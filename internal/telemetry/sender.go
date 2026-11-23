@@ -91,9 +91,10 @@ type Batch struct {
 }
 
 type pendingBatch struct {
-	Batch     Batch          `json:"batch"`
-	Sources   []Source       `json:"sources"`
-	Following []pendingBatch `json:"following,omitempty"`
+	Batch            Batch          `json:"batch"`
+	Sources          []Source       `json:"sources"`
+	CompletedSources []Source       `json:"completed_sources,omitempty"`
+	Following        []pendingBatch `json:"following,omitempty"`
 }
 
 type QuarantineEntry struct {
@@ -210,7 +211,7 @@ func (s *Sender) Send(ctx context.Context, agentID string, instanceID string, cr
 			if err := s.quarantinePending(http.StatusRequestEntityTooLarge, "single telemetry record exceeds 64 KiB"); err != nil {
 				return nil, fmt.Errorf("quarantine oversized telemetry record: %w", err)
 			}
-			return markQuarantined(pending.Sources, http.StatusRequestEntityTooLarge), nil
+			return s.quarantinedSourcesOrAdvance(pending, http.StatusRequestEntityTooLarge)
 		}
 	}
 
@@ -275,13 +276,13 @@ func (s *Sender) Send(ctx context.Context, agentID string, instanceID string, cr
 			if ack.Data.RecordCount != len(pending.Batch.Records) || ack.Data.AcceptedCount+ack.Data.DuplicateCount != len(pending.Batch.Records) {
 				return nil, errors.New("Central telemetry acknowledgement counts do not match the pending batch")
 			}
-			return pending.Sources, nil
+			return s.acknowledgedSourcesOrAdvance(pending)
 
 		case http.StatusForbidden, http.StatusConflict, http.StatusGone, http.StatusUnprocessableEntity:
 			if err := s.quarantinePending(response.StatusCode, string(responseBody)); err != nil {
 				return nil, fmt.Errorf("quarantine permanent Central telemetry rejection: %w", err)
 			}
-			return markQuarantined(pending.Sources, response.StatusCode), nil
+			return s.quarantinedSourcesOrAdvance(pending, response.StatusCode)
 
 		case http.StatusRequestEntityTooLarge:
 			if len(pending.Batch.Records) == 1 {
@@ -336,6 +337,8 @@ func (s *Sender) Complete() error {
 
 	next := pending.Following[0]
 	next.Following = append([]pendingBatch(nil), pending.Following[1:]...)
+	candidates := mergeSources(pending.CompletedSources, pending.Sources)
+	next.CompletedSources = sourcesStillPending(candidates, next.Following)
 	return s.savePending(next)
 }
 
@@ -347,10 +350,9 @@ func (s *Sender) PendingSources() ([]Source, bool, error) {
 	if pending == nil {
 		return nil, false, nil
 	}
-	sources := append([]Source(nil), pending.Sources...)
-	for _, following := range pending.Following {
-		sources = append(sources, following.Sources...)
-	}
+
+	sources := mergeSources(pending.CompletedSources, pending.Sources)
+	sources = mergeSources(sources, flattenFollowingSources(pending.Following))
 	return sources, true, nil
 }
 
@@ -501,6 +503,7 @@ func (s *Sender) splitPending(pending pendingBatch) error {
 	}
 
 	left := pendingBatch{
+		CompletedSources: append([]Source(nil), pending.CompletedSources...),
 		Batch: Batch{
 			ProtocolVersion: pending.Batch.ProtocolVersion,
 			BatchID:         leftID,
@@ -533,12 +536,15 @@ func (s *Sender) quarantinePending(statusCode int, reason string) error {
 		return nil
 	}
 
-	pending.Following = nil
+	quarantinedSources := markQuarantined(pending.Sources, statusCode)
+	entryPending := *pending
+	entryPending.Sources = quarantinedSources
+	entryPending.Following = nil
 	entry := QuarantineEntry{
 		QuarantinedAt: time.Now().UTC(),
 		StatusCode:    statusCode,
 		Reason:        reason,
-		Pending:       *pending,
+		Pending:       entryPending,
 	}
 	content, err := json.Marshal(entry)
 	if err != nil {
@@ -569,7 +575,105 @@ func (s *Sender) quarantinePending(statusCode int, reason string) error {
 	if err := syncDirectory(s.dir); err != nil {
 		return fmt.Errorf("sync telemetry quarantine directory: %w", err)
 	}
-	return nil
+
+	pending.Sources = quarantinedSources
+	return s.savePending(*pending)
+}
+
+func (s *Sender) acknowledgedSourcesOrAdvance(pending *pendingBatch) ([]Source, error) {
+	sources := sourcesStillPending(
+		mergeSources(pending.CompletedSources, pending.Sources),
+		pending.Following,
+	)
+	if len(sources) == 0 && len(pending.Following) > 0 {
+		if err := s.Complete(); err != nil {
+			return nil, fmt.Errorf("advance acknowledged split batch: %w", err)
+		}
+		return nil, nil
+	}
+	return sources, nil
+}
+
+func (s *Sender) quarantinedSourcesOrAdvance(pending *pendingBatch, statusCode int) ([]Source, error) {
+	if err := s.quarantinePending(statusCode, fmt.Sprintf("Central rejected telemetry with HTTP %d", statusCode)); err != nil {
+		return nil, fmt.Errorf("persist telemetry quarantine: %w", err)
+	}
+
+	updated, err := s.loadPending()
+	if err != nil {
+		return nil, err
+	}
+	if updated == nil {
+		return nil, errors.New("quarantined telemetry pending state disappeared")
+	}
+
+	sources := sourcesStillPending(
+		mergeSources(updated.CompletedSources, updated.Sources),
+		updated.Following,
+	)
+	if len(sources) == 0 && len(updated.Following) > 0 {
+		if err := s.Complete(); err != nil {
+			return nil, fmt.Errorf("advance quarantined split batch: %w", err)
+		}
+		if statusCode == http.StatusGone {
+			return nil, &HTTPStatusError{StatusCode: statusCode, Message: "scope rejected; Control Poll must refresh"}
+		}
+		return nil, nil
+	}
+	return sources, nil
+}
+
+func flattenFollowingSources(following []pendingBatch) []Source {
+	var sources []Source
+	for _, pending := range following {
+		sources = mergeSources(sources, pending.CompletedSources)
+		sources = mergeSources(sources, pending.Sources)
+		sources = mergeSources(sources, flattenFollowingSources(pending.Following))
+	}
+	return sources
+}
+
+func mergeSources(groups ...[]Source) []Source {
+	merged := make([]Source, 0)
+	indices := make(map[string]int)
+	for _, group := range groups {
+		for _, source := range group {
+			key := source.Kind + "|" + source.ApplicationID + "|" + source.EventID
+			if index, found := indices[key]; found {
+				if source.Quarantined {
+					merged[index].Quarantined = true
+					merged[index].QuarantineStatus = source.QuarantineStatus
+				}
+				continue
+			}
+			indices[key] = len(merged)
+			merged = append(merged, source)
+		}
+	}
+	return merged
+}
+
+func sourcesStillPending(candidates []Source, following []pendingBatch) []Source {
+	if len(candidates) == 0 {
+		return nil
+	}
+	future := make(map[string]struct{})
+	addSourcesToSet(future, flattenFollowingSources(following))
+
+	result := make([]Source, 0, len(candidates))
+	for _, source := range candidates {
+		key := source.Kind + "|" + source.ApplicationID + "|" + source.EventID
+		if _, found := future[key]; !found {
+			result = append(result, source)
+		}
+	}
+	return mergeSources(result)
+}
+
+func addSourcesToSet(target map[string]struct{}, sources []Source) {
+	for _, source := range sources {
+		target[source.Kind+"|"+source.ApplicationID+"|"+source.EventID] = struct{}{}
+	}
 }
 
 func markQuarantined(sources []Source, statusCode int) []Source {
