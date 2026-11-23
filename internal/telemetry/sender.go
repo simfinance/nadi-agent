@@ -67,6 +67,7 @@ type Source struct {
 	Kind             string `json:"kind"`
 	ApplicationID    string `json:"application_id,omitempty"`
 	EventID          string `json:"event_id"`
+	Stream           string `json:"stream"`
 	Quarantined      bool   `json:"quarantined,omitempty"`
 	QuarantineStatus int    `json:"quarantine_status,omitempty"`
 }
@@ -479,7 +480,9 @@ func (s *Sender) buildPending(instanceID string, inputs []InputRecord) (*pending
 		}
 
 		batch.Records = candidate.Records
-		sources = append(sources, input.Source)
+		source := input.Source
+		source.Stream = input.Stream
+		sources = append(sources, source)
 		sequences.Values[sequenceKey] = nextSequence
 
 		if len(encodedRecord) > MaximumRecordBytes || len(encodedBatch) > MaximumBatchBytes {
@@ -607,7 +610,7 @@ func flattenPendingBatches(pending pendingBatch) []pendingBatch {
 }
 
 func (s *Sender) acknowledgedSourcesOrAdvance(pending *pendingBatch) ([]Source, error) {
-	sources := sourcesStillPending(
+	sources := acknowledgeableSources(
 		mergeSources(pending.CompletedSources, pending.Sources),
 		pending.Following,
 	)
@@ -633,7 +636,7 @@ func (s *Sender) quarantinedSourcesOrAdvance(pending *pendingBatch, statusCode i
 		return nil, errors.New("quarantined telemetry pending state disappeared")
 	}
 
-	sources := sourcesStillPending(
+	sources := acknowledgeableSources(
 		mergeSources(updated.CompletedSources, updated.Sources),
 		updated.Following,
 	)
@@ -659,12 +662,20 @@ func flattenFollowingSources(following []pendingBatch) []Source {
 	return sources
 }
 
+func sourceEventKey(source Source) string {
+	return source.Kind + "|" + source.ApplicationID + "|" + source.EventID
+}
+
+func sourceRecordKey(source Source) string {
+	return sourceEventKey(source) + "|" + source.Stream
+}
+
 func mergeSources(groups ...[]Source) []Source {
 	merged := make([]Source, 0)
 	indices := make(map[string]int)
 	for _, group := range groups {
 		for _, source := range group {
-			key := source.Kind + "|" + source.ApplicationID + "|" + source.EventID
+			key := sourceRecordKey(source)
 			if index, found := indices[key]; found {
 				if source.Quarantined {
 					merged[index].Quarantined = true
@@ -688,19 +699,53 @@ func sourcesStillPending(candidates []Source, following []pendingBatch) []Source
 
 	result := make([]Source, 0, len(candidates))
 	for _, source := range candidates {
-		key := source.Kind + "|" + source.ApplicationID + "|" + source.EventID
-		if _, found := future[key]; !found {
+		if _, found := future[sourceEventKey(source)]; found {
 			result = append(result, source)
 		}
 	}
 	return mergeSources(result)
 }
 
+func acknowledgeableSources(candidates []Source, following []pendingBatch) []Source {
+	if len(candidates) == 0 {
+		return nil
+	}
+	future := make(map[string]struct{})
+	addSourcesToSet(future, flattenFollowingSources(following))
+
+	result := make([]Source, 0, len(candidates))
+	for _, source := range candidates {
+		if _, found := future[sourceEventKey(source)]; !found {
+			result = append(result, source)
+		}
+	}
+	return mergeAcknowledgedSources(result)
+}
+
+func mergeAcknowledgedSources(sources []Source) []Source {
+	merged := make([]Source, 0)
+	indices := make(map[string]int)
+	for _, source := range sources {
+		key := sourceEventKey(source)
+		if index, found := indices[key]; found {
+			if source.Quarantined {
+				merged[index].Quarantined = true
+				merged[index].QuarantineStatus = source.QuarantineStatus
+			}
+			continue
+		}
+		indices[key] = len(merged)
+		merged = append(merged, source)
+	}
+	return merged
+}
+
 func addSourcesToSet(target map[string]struct{}, sources []Source) {
 	for _, source := range sources {
-		target[source.Kind+"|"+source.ApplicationID+"|"+source.EventID] = struct{}{}
+		target[sourceEventKey(source)] = struct{}{}
 	}
 }
+
 
 func markQuarantined(sources []Source, statusCode int) []Source {
 	result := append([]Source(nil), sources...)
