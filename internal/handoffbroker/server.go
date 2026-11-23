@@ -888,8 +888,13 @@ func validateConfig(config Config) error {
 			return errors.New("application mapping paths must already be canonical")
 		}
 
-		if !strings.HasPrefix(credentialPath, basePath+string(os.PathSeparator)) {
-			return errors.New("credential destination must be inside the canonical application base path")
+		expectedCredentialPath := filepath.Join(
+			"/var/lib/nadi-bridge",
+			mapping.ApplicationID,
+			"credential",
+		)
+		if credentialPath != expectedCredentialPath {
+			return errors.New("credential destination must use the fixed root-owned NADI Bridge credential directory")
 		}
 
 		if filepath.Dir(activationPath) != "/run/nadi-agent/bridge-state" {
