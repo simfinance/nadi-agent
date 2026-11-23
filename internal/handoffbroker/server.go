@@ -221,13 +221,26 @@ func (s *Server) ListenAndServe() error {
 		return fmt.Errorf("secure broker socket permissions: %w", err)
 	}
 
+	const maximumConcurrentConnections = 16
+	connections := make(chan struct{}, maximumConcurrentConnections)
+
 	for {
 		connection, acceptErr := listener.Accept()
 		if acceptErr != nil {
 			return fmt.Errorf("accept broker connection: %w", acceptErr)
 		}
 
-		go s.handleConnection(connection)
+		select {
+		case connections <- struct{}{}:
+			go func() {
+				defer func() {
+					<-connections
+				}()
+				s.handleConnection(connection)
+			}()
+		default:
+			_ = connection.Close()
+		}
 	}
 }
 
