@@ -246,9 +246,10 @@ func (s *Sender) DiscardPending() error {
 }
 
 func (s *Sender) buildPending(instanceID string, inputs []InputRecord) (*pendingBatch, error) {
-	if len(inputs) > MaximumBatchRecords {
-		inputs = inputs[:MaximumBatchRecords]
+	if len(inputs) == 0 {
+		return nil, nil
 	}
+
 	sequences, err := s.loadSequences()
 	if err != nil {
 		return nil, err
@@ -257,15 +258,22 @@ func (s *Sender) buildPending(instanceID string, inputs []InputRecord) (*pending
 	if err != nil {
 		return nil, err
 	}
+
 	batch := Batch{
 		ProtocolVersion: "1.0",
 		BatchID:         batchID,
 		AgentInstanceID: instanceID,
 		SentAt:          time.Now().UTC(),
-		Records:         make([]Record, 0, len(inputs)),
+		Records:         make([]Record, 0, min(len(inputs), MaximumBatchRecords)),
 	}
-	sources := make([]Source, 0, len(inputs))
-	for _, input := range inputs {
+	sources := make([]Source, 0, cap(batch.Records))
+	scopeKey := ""
+
+	for index, input := range inputs {
+		if index >= MaximumBatchRecords {
+			break
+		}
+
 		if _, supported := RequiredCapability(input.Stream); !supported {
 			return nil, fmt.Errorf("unsupported Central telemetry stream %q", input.Stream)
 		}
@@ -275,26 +283,36 @@ func (s *Sender) buildPending(instanceID string, inputs []InputRecord) (*pending
 		if input.MetricSet != nil && len(*input.MetricSet) > 100 {
 			return nil, errors.New("telemetry metric_set exceeds 100 characters")
 		}
+		if input.Source.EventID == "" {
+			return nil, errors.New("telemetry source event_id must not be empty")
+		}
+
+		currentScope := "server"
 		if IsServerStream(input.Stream) {
 			if input.ApplicationID != nil {
 				return nil, fmt.Errorf("server stream %s must not contain application_id", input.Stream)
 			}
-		} else if input.ApplicationID == nil || !uuidPattern.MatchString(*input.ApplicationID) {
-			return nil, fmt.Errorf("application stream %s requires a valid application_id UUID", input.Stream)
+			if input.Source.Kind != "server" || input.Source.ApplicationID != "" {
+				return nil, fmt.Errorf("server stream %s has an invalid local source scope", input.Stream)
+			}
+		} else {
+			if input.ApplicationID == nil || !uuidPattern.MatchString(*input.ApplicationID) {
+				return nil, fmt.Errorf("application stream %s requires a valid application_id UUID", input.Stream)
+			}
+			if input.Source.Kind != "application" || input.Source.ApplicationID != *input.ApplicationID {
+				return nil, fmt.Errorf("application stream %s source does not match application_id", input.Stream)
+			}
+			currentScope = *input.ApplicationID
 		}
-		if input.ApplicationID != nil && !uuidPattern.MatchString(*input.ApplicationID) {
-			return nil, errors.New("telemetry application_id must be a UUID")
+
+		if scopeKey == "" {
+			scopeKey = currentScope
+		} else if scopeKey != currentScope {
+			break
 		}
-		scope := "server"
-		if input.ApplicationID != nil {
-			scope = *input.ApplicationID
-		}
-		sequenceKey := scope + "|" + input.Stream
-		sequences.Values[sequenceKey]++
-		recordID, err := newUUID()
-		if err != nil {
-			return nil, err
-		}
+
+		sequenceKey := currentScope + "|" + input.Stream
+		nextSequence := sequences.Values[sequenceKey] + 1
 		observedAt := input.ObservedAt.UTC()
 		collectedAt := input.CollectedAt.UTC()
 		if observedAt.IsZero() {
@@ -303,16 +321,22 @@ func (s *Sender) buildPending(instanceID string, inputs []InputRecord) (*pending
 		if collectedAt.IsZero() {
 			collectedAt = time.Now().UTC()
 		}
+
+		recordID, err := newUUID()
+		if err != nil {
+			return nil, err
+		}
 		record := Record{
 			RecordID:      recordID,
 			Stream:        input.Stream,
-			Sequence:      sequences.Values[sequenceKey],
+			Sequence:      nextSequence,
 			ObservedAt:    observedAt,
 			CollectedAt:   collectedAt,
 			ApplicationID: input.ApplicationID,
 			MetricSet:     input.MetricSet,
 			Data:          append(json.RawMessage(nil), input.Data...),
 		}
+
 		encodedRecord, err := json.Marshal(record)
 		if err != nil {
 			return nil, fmt.Errorf("encode telemetry record: %w", err)
@@ -320,15 +344,27 @@ func (s *Sender) buildPending(instanceID string, inputs []InputRecord) (*pending
 		if len(encodedRecord) > MaximumRecordBytes {
 			return nil, fmt.Errorf("telemetry record for stream %s exceeds %d bytes", input.Stream, MaximumRecordBytes)
 		}
-		batch.Records = append(batch.Records, record)
+
+		candidate := batch
+		candidate.Records = append(append([]Record(nil), batch.Records...), record)
+		encodedBatch, err := json.Marshal(candidate)
+		if err != nil {
+			return nil, fmt.Errorf("encode telemetry batch: %w", err)
+		}
+		if len(encodedBatch) > MaximumBatchBytes {
+			if len(batch.Records) == 0 {
+				return nil, fmt.Errorf("single telemetry record for stream %s exceeds %d-byte batch limit", input.Stream, MaximumBatchBytes)
+			}
+			break
+		}
+
+		batch.Records = candidate.Records
 		sources = append(sources, input.Source)
+		sequences.Values[sequenceKey] = nextSequence
 	}
-	encoded, err := json.Marshal(batch)
-	if err != nil {
-		return nil, err
-	}
-	if len(encoded) > MaximumBatchBytes {
-		return nil, fmt.Errorf("telemetry batch exceeds %d bytes; batch splitting is required", MaximumBatchBytes)
+
+	if len(batch.Records) == 0 {
+		return nil, nil
 	}
 	if err := s.saveSequences(sequences); err != nil {
 		return nil, err
