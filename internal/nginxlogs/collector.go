@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -24,7 +25,7 @@ const (
 var (
 	linePattern   = regexp.MustCompile(`^(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}) \[(emerg|alert|crit|error|warn|notice|info|debug)\] \d+#\d+: (.*)$`)
 	ipv4Pattern   = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
-	ipv6Pattern   = regexp.MustCompile(`\b[0-9a-fA-F:]{3,}\b`)
+	ipv6Pattern   = regexp.MustCompile(`(?i)\b[0-9a-f]{1,4}(?::[0-9a-f]{0,4}){2,}\b|::[0-9a-f]{1,4}(?::[0-9a-f]{0,4})*`)
 	quotedPattern = regexp.MustCompile(`"[^"]*"`)
 	secretPattern = regexp.MustCompile(`(?i)(token|password|passwd|secret|authorization|api[_-]?key)=([^\s,;]+)`)
 )
@@ -216,7 +217,13 @@ func parseLine(line string) (Entry, bool) {
 	normalized = quotedPattern.ReplaceAllString(normalized, "<quoted>")
 	normalized = secretPattern.ReplaceAllString(normalized, "$1=<redacted>")
 	normalized = ipv4Pattern.ReplaceAllString(normalized, "<ip>")
-	normalized = ipv6Pattern.ReplaceAllString(normalized, "<address>")
+	normalized = ipv6Pattern.ReplaceAllStringFunc(normalized, func(candidate string) string {
+		if net.ParseIP(candidate) != nil {
+			return "<address>"
+		}
+
+		return candidate
+	})
 	normalized = strings.Join(strings.Fields(normalized), " ")
 	digest := sha256.Sum256([]byte(level + "|" + normalized))
 
