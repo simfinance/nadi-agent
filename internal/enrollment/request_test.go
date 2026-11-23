@@ -118,36 +118,35 @@ func TestUsableIPv4AcceptsPrivateServerAddress(t *testing.T) {
 	}
 }
 
-
 func TestBuildRequestAllowsMissingOptionalIPv4Address(t *testing.T) {
-    manifest := Manifest{
-        Applications: []ApplicationInput{
-            {
-                ApplicationKey:  "portal-production",
-                ApplicationName: "Portal",
-                Environment:     "production",
-                BaseURL:         "https://portal.example.test",
-            },
-        },
-    }
-    agentState := state.State{
-        AgentInstanceID: "8f3d2f44-8b8d-4c91-8e35-58c5a6f79e14",
-        Hostname:        "agent-test",
-    }
+	manifest := Manifest{
+		Applications: []ApplicationInput{
+			{
+				ApplicationKey:  "portal-production",
+				ApplicationName: "Portal",
+				Environment:     "production",
+				BaseURL:         "https://portal.example.test",
+			},
+		},
+	}
+	agentState := state.State{
+		AgentInstanceID: "8f3d2f44-8b8d-4c91-8e35-58c5a6f79e14",
+		Hostname:        "agent-test",
+	}
 
-    body, _, err := buildRequest(agentState, strings.Repeat("x", 76), manifest, "")
-    if err != nil {
-        t.Fatalf("buildRequest must allow nullable Central server.ip_address: %v", err)
-    }
+	body, _, err := buildRequest(agentState, strings.Repeat("x", 76), manifest, "")
+	if err != nil {
+		t.Fatalf("buildRequest must allow nullable Central server.ip_address: %v", err)
+	}
 
-    var payload struct {
-        Server map[string]json.RawMessage `json:"server"`
-    }
-    if err := json.Unmarshal(body, &payload); err != nil {
-        t.Fatalf("decode generated Central enrollment request: %v", err)
-    }
+	var payload struct {
+		Server map[string]json.RawMessage `json:"server"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode generated Central enrollment request: %v", err)
+	}
 
-    if _, exists := payload.Server["ip_address"]; exists {
-        t.Fatal("empty optional server.ip_address must be omitted from the Central enrollment payload")
-    }
+	if _, exists := payload.Server["ip_address"]; exists {
+		t.Fatal("empty optional server.ip_address must be omitted from the Central enrollment payload")
+	}
 }
