@@ -753,9 +753,19 @@ func validateConfig(config Config) error {
             return errors.New("credential destination must be inside the canonical application base path")
         }
 
-        if !strings.HasPrefix(activationPath, "/run/nadi-agent/bridge-state/") {
+        if filepath.Dir(activationPath) != "/run/nadi-agent/bridge-state" {
             return errors.New("activation assertion destination is outside the fixed runtime directory")
         }
+
+        if _, duplicate := seenCredentialPaths[credentialPath]; duplicate {
+            return errors.New("multiple applications share a credential destination")
+        }
+        if _, duplicate := seenActivationPaths[activationPath]; duplicate {
+            return errors.New("multiple applications share an activation assertion destination")
+        }
+
+        seenCredentialPaths[credentialPath] = struct{}{}
+        seenActivationPaths[activationPath] = struct{}{}
     }
 
     return nil
