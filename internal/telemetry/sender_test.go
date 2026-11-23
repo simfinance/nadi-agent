@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -297,5 +298,230 @@ func TestBuildPendingCapsBatchAtFiveHundredWithoutAcknowledgingRemainder(t *test
 	}
 	if len(pending.Batch.Records) != MaximumBatchRecords || len(pending.Sources) != MaximumBatchRecords {
 		t.Fatalf("expected exactly %d records and sources, got %d and %d", MaximumBatchRecords, len(pending.Batch.Records), len(pending.Sources))
+	}
+}
+
+
+func TestSendQuarantinesPermanentCentralStatuses(t *testing.T) {
+	for _, statusCode := range []int{
+		http.StatusForbidden,
+		http.StatusConflict,
+		http.StatusGone,
+		http.StatusUnprocessableEntity,
+	} {
+		t.Run(fmt.Sprintf("http_%d", statusCode), func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				writer.WriteHeader(statusCode)
+				_, _ = writer.Write([]byte(`{"success":false,"message":"permanent rejection"}`))
+			}))
+			defer server.Close()
+
+			directory := t.TempDir()
+			sender, err := NewSender(server.URL, directory, time.Second)
+			if err != nil {
+				t.Fatalf("create sender: %v", err)
+			}
+			sender.client = server.Client()
+
+			applicationID := "11111111-1111-4111-8111-111111111111"
+			sources, err := sender.Send(context.Background(), "agent-1", "22222222-2222-4222-8222-222222222222", "credential", []InputRecord{{
+				Stream:        "application_metrics",
+				ApplicationID: &applicationID,
+				Data:          json.RawMessage(`{}`),
+				Source: Source{
+					Kind:          "application",
+					ApplicationID: applicationID,
+					EventID:       "event-permanent",
+				},
+			}})
+			if err != nil {
+				t.Fatalf("send permanent rejection: %v", err)
+			}
+			if len(sources) != 1 || !sources[0].Quarantined {
+				t.Fatalf("expected source to be locally quarantined, got %#v", sources)
+			}
+			if _, err := os.Stat(filepath.Join(directory, "quarantine.ndjson")); err != nil {
+				t.Fatalf("quarantine was not persisted: %v", err)
+			}
+			if err := sender.Complete(); err != nil {
+				t.Fatalf("complete quarantined batch: %v", err)
+			}
+		})
+	}
+}
+
+func TestSendSplits413AndPreservesRecordIdentityAcrossRestart(t *testing.T) {
+	var received []Batch
+	requestCount := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requestCount++
+		var batch Batch
+		if err := json.NewDecoder(request.Body).Decode(&batch); err != nil {
+			t.Fatalf("decode batch: %v", err)
+		}
+		received = append(received, batch)
+
+		if requestCount == 1 {
+			writer.WriteHeader(http.StatusRequestEntityTooLarge)
+			_, _ = writer.Write([]byte(`{"success":false,"message":"split required"}`))
+			return
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(
+			writer,
+			`{"success":true,"data":{"success":true,"batch_id":"%s","status":"accepted","record_count":%d,"accepted_count":%d,"duplicate_count":0,"rejected_count":0,"replayed":false}}`,
+			batch.BatchID,
+			len(batch.Records),
+			len(batch.Records),
+		)
+	}))
+	defer server.Close()
+
+	directory := t.TempDir()
+	sender, err := NewSender(server.URL, directory, time.Second)
+	if err != nil {
+		t.Fatalf("create sender: %v", err)
+	}
+	sender.client = server.Client()
+
+	applicationID := "11111111-1111-4111-8111-111111111111"
+	inputs := []InputRecord{
+		{
+			Stream:        "application_metrics",
+			ApplicationID: &applicationID,
+			Data:          json.RawMessage(`{"metric":1}`),
+			Source: Source{
+				Kind:          "application",
+				ApplicationID: applicationID,
+				EventID:       "split-event-1",
+			},
+		},
+		{
+			Stream:        "application_metrics",
+			ApplicationID: &applicationID,
+			Data:          json.RawMessage(`{"metric":2}`),
+			Source: Source{
+				Kind:          "application",
+				ApplicationID: applicationID,
+				EventID:       "split-event-2",
+			},
+		},
+	}
+
+	original, err := sender.buildPending("22222222-2222-4222-8222-222222222222", inputs)
+	if err != nil {
+		t.Fatalf("build original batch: %v", err)
+	}
+	originalBatchID := original.Batch.BatchID
+	originalRecords := append([]Record(nil), original.Batch.Records...)
+	if err := sender.savePending(*original); err != nil {
+		t.Fatalf("persist original batch: %v", err)
+	}
+
+	sources, err := sender.Send(context.Background(), "agent-1", "22222222-2222-4222-8222-222222222222", "credential", nil)
+	if err != nil {
+		t.Fatalf("handle HTTP 413: %v", err)
+	}
+	if len(sources) != 0 {
+		t.Fatalf("HTTP 413 split must not acknowledge sources: %#v", sources)
+	}
+
+	pending, err := sender.loadPending()
+	if err != nil {
+		t.Fatalf("load split queue: %v", err)
+	}
+	if pending.Batch.BatchID == originalBatchID || len(pending.Batch.Records) != 1 || len(pending.Following) != 1 {
+		t.Fatal("split queue did not create two child batches with a new batch ID")
+	}
+
+	afterRestart, err := NewSender(server.URL, directory, time.Second)
+	if err != nil {
+		t.Fatalf("recreate sender after restart: %v", err)
+	}
+	afterRestart.client = server.Client()
+
+	firstSources, err := afterRestart.Send(context.Background(), "agent-1", "22222222-2222-4222-8222-222222222222", "credential", nil)
+	if err != nil {
+		t.Fatalf("send first split child: %v", err)
+	}
+	if len(firstSources) != 1 {
+		t.Fatalf("expected first child acknowledgement, got %#v", firstSources)
+	}
+	if err := afterRestart.Complete(); err != nil {
+		t.Fatalf("advance split queue: %v", err)
+	}
+
+	secondSources, err := afterRestart.Send(context.Background(), "agent-1", "22222222-2222-4222-8222-222222222222", "credential", nil)
+	if err != nil {
+		t.Fatalf("send second split child: %v", err)
+	}
+	if len(secondSources) != 1 {
+		t.Fatalf("expected second child acknowledgement, got %#v", secondSources)
+	}
+	if err := afterRestart.Complete(); err != nil {
+		t.Fatalf("complete second split child: %v", err)
+	}
+
+	if len(received) != 3 {
+		t.Fatalf("expected original 413 and two child requests, got %d", len(received))
+	}
+	if received[0].BatchID == received[1].BatchID || received[0].BatchID == received[2].BatchID || received[1].BatchID == received[2].BatchID {
+		t.Fatal("split batches must each have new, distinct batch IDs")
+	}
+
+	for index, batch := range received[1:] {
+		if len(batch.Records) != 1 {
+			t.Fatalf("split child %d has %d records", index, len(batch.Records))
+		}
+		found := false
+		for _, originalRecord := range originalRecords {
+			if batch.Records[0].RecordID == originalRecord.RecordID &&
+				batch.Records[0].Sequence == originalRecord.Sequence {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("split child %d changed record_id or sequence", index)
+		}
+	}
+}
+
+func TestBuildPendingRespectsOneMiBBatchLimit(t *testing.T) {
+	sender, err := NewSender("https://central.example", t.TempDir(), time.Second)
+	if err != nil {
+		t.Fatalf("create sender: %v", err)
+	}
+
+	applicationID := "11111111-1111-4111-8111-111111111111"
+	payload := json.RawMessage(`{"value":"` + strings.Repeat("x", 3000) + `"}`)
+	inputs := make([]InputRecord, MaximumBatchRecords)
+	for index := range inputs {
+		inputs[index] = InputRecord{
+			Stream:        "application_metrics",
+			ApplicationID: &applicationID,
+			Data:          payload,
+			Source: Source{
+				Kind:          "application",
+				ApplicationID: applicationID,
+				EventID:       fmt.Sprintf("large-event-%d", index),
+			},
+		}
+	}
+
+	pending, err := sender.buildPending("22222222-2222-4222-8222-222222222222", inputs)
+	if err != nil {
+		t.Fatalf("build size-bounded batch: %v", err)
+	}
+	encoded, err := json.Marshal(pending.Batch)
+	if err != nil {
+		t.Fatalf("encode size-bounded batch: %v", err)
+	}
+	if len(encoded) > MaximumBatchBytes {
+		t.Fatalf("batch exceeds 1 MiB: %d", len(encoded))
+	}
+	if len(pending.Batch.Records) >= MaximumBatchRecords {
+		t.Fatal("expected byte limit to stop the batch before the 500-record limit")
 	}
 }
