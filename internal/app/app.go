@@ -40,7 +40,12 @@ type App struct {
 }
 
 func New(cfg config.Config, logger *slog.Logger) *App {
-	handoffClient, _ := handoff.NewClient(cfg.HandoffSocketPath, 2*time.Second)
+	socketPath := cfg.HandoffSocketPath
+	if socketPath == "" {
+		socketPath = "/run/nadi-agent/credential-handoff.sock"
+	}
+
+	handoffClient, _ := handoff.NewClient(socketPath, 2*time.Second)
 
 	return &App{
 		config: cfg,
