@@ -112,6 +112,10 @@ func (c Config) Validate() error {
 		return errors.New("NADI_STATE_DIR must not be empty")
 	}
 
+	if c.HandoffSocketPath != "" && !strings.HasPrefix(c.HandoffSocketPath, "/") {
+		return errors.New("NADI_AGENT_HANDOFF_SOCKET must be an absolute path")
+	}
+
 
 	if c.SystemLogTelemetryEnabled && strings.TrimSpace(c.NginxErrorLogPath) == "" {
 		return errors.New("NADI_AGENT_NGINX_ERROR_LOG_PATH is required when system log telemetry is enabled")
