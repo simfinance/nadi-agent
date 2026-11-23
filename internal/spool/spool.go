@@ -157,7 +157,7 @@ func (s *Store) AppendNginxErrorLogs(
 		if len(encoded) > MaxRecordBytes {
 			return records, fmt.Errorf("Nginx error log spool record exceeds %d bytes", MaxRecordBytes)
 		}
-		encoded = append(encoded, '\\n')
+		encoded = append(encoded, '\n')
 
 		currentSize, currentRecords, err := s.measure()
 		if err != nil {
