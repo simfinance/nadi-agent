@@ -75,15 +75,30 @@ func (a *App) deliverTelemetry(
 			continue
 		}
 
+		decision := decisions[application.ApplicationID]
+		maximumRecordsPerSnapshot := 0
+		if hasCapability(decision.Capabilities, "application_metrics") {
+			maximumRecordsPerSnapshot++
+		}
+		if hasCapability(decision.Capabilities, appmonitor.CapabilityDatabaseMonitoring) {
+			maximumRecordsPerSnapshot++
+		}
+		if hasCapability(decision.Capabilities, appmonitor.CapabilityApplicationLogs) {
+			maximumRecordsPerSnapshot += 100
+		}
+		if maximumRecordsPerSnapshot == 0 {
+			continue
+		}
+
 		remaining := telemetry.MaximumBatchRecords - len(inputs)
-		if remaining <= 0 {
+		maximumSnapshots := remaining / maximumRecordsPerSnapshot
+		if maximumSnapshots <= 0 {
 			break
 		}
-		applicationRecords, err := a.applicationSpool.ReadBatch(application.ApplicationID, remaining)
+		applicationRecords, err := a.applicationSpool.ReadBatch(application.ApplicationID, maximumSnapshots)
 		if err != nil {
 			return fmt.Errorf("read application telemetry spool for %s: %w", application.ApplicationID, err)
 		}
-		decision := decisions[application.ApplicationID]
 		for _, record := range applicationRecords {
 			source := telemetry.Source{
 				Kind:          "application",
