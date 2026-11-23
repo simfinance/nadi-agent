@@ -3,12 +3,16 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 
 	"nadi-agent/internal/activation"
 	"nadi-agent/internal/state"
 	"nadi-agent/internal/telemetry"
 )
+
+var ErrControlPollRequired = errors.New("Central returned HTTP 410; refresh Control Poll immediately")
 
 func (a *App) deliverTelemetry(
 	ctx context.Context,
@@ -158,7 +162,13 @@ func (a *App) deliverTelemetry(
 		}
 	}
 	if err := a.telemetrySender.Complete(); err != nil {
-		return fmt.Errorf("finalize Central-accepted telemetry batch: %w", err)
+		return fmt.Errorf("finalize telemetry batch: %w", err)
+	}
+
+	for _, source := range acknowledged {
+		if source.QuarantineStatus == http.StatusGone {
+			return ErrControlPollRequired
+		}
 	}
 
 	a.logger.Info(
