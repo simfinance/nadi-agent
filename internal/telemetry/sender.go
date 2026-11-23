@@ -341,8 +341,7 @@ func (s *Sender) PendingSources() ([]Source, bool, error) {
 		return nil, false, nil
 	}
 
-	sources := mergeSources(pending.CompletedSources, pending.Sources)
-	sources = mergeSources(sources, flattenFollowingSources(pending.Following))
+	sources := mergeSources(pending.Sources, flattenFollowingDeliverySources(pending.Following))
 	return sources, true, nil
 }
 
@@ -668,6 +667,16 @@ func sourceEventKey(source Source) string {
 
 func sourceRecordKey(source Source) string {
 	return sourceEventKey(source) + "|" + source.Stream
+}
+
+
+func flattenFollowingDeliverySources(following []pendingBatch) []Source {
+	var sources []Source
+	for _, pending := range following {
+		sources = mergeSources(sources, pending.Sources)
+		sources = mergeSources(sources, flattenFollowingDeliverySources(pending.Following))
+	}
+	return sources
 }
 
 func mergeSources(groups ...[]Source) []Source {
