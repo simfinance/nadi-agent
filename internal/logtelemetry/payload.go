@@ -13,10 +13,10 @@ import (
 )
 
 const (
-	MaximumMessageBytes        = 8192
-	MaximumContextStringRunes  = 2048
-	MaximumContextFields       = 50
-	MaximumChannelBytes        = 100
+	MaximumMessageBytes       = 8192
+	MaximumContextStringRunes = 2048
+	MaximumContextFields      = 50
+	MaximumChannelBytes       = 100
 )
 
 var (
@@ -32,8 +32,8 @@ var (
 	}
 
 	sensitiveAssignmentPattern = regexp.MustCompile(`(?i)\b(authorization|proxy-authorization|password|passwd|token|access[_-]?token|refresh[_-]?token|cookie|set-cookie|api[_-]?key|secret|credential|private[_-]?key)\b\s*[:=]\s*(?:bearer\s+)?("[^"]*"|'[^']*'|[^\s,;]+)`)
-	cookieHeaderPattern         = regexp.MustCompile(`(?i)\b(cookie|set-cookie)\b\s*[:=]\s*[^,]+`)
-	bearerTokenPattern          = regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/-]+=*`)
+	cookieHeaderPattern        = regexp.MustCompile(`(?i)\b(cookie|set-cookie)\b\s*[:=]\s*[^,]+`)
+	bearerTokenPattern         = regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/-]+=*`)
 	stackTracePattern          = regexp.MustCompile(`(?im)^\s*(?:at\s+[A-Za-z0-9_.$/<>-]+|goroutine\s+\d+\s+\[|#\d+\s+0x[0-9a-f]+)`)
 )
 

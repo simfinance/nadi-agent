@@ -101,11 +101,11 @@ func TestNormalizeApplicationLogRejectsUnknownFieldsAndInvalidContext(t *testing
 
 	tests := map[string]string{
 		"unknown top-level field": `{` + base + `,"stack_trace":"raw"}`,
-		"null context":             `{` + base + `,"context":null}`,
-		"array context":            `{` + base + `,"context":[]}`,
-		"nested context":           `{` + base + `,"context":{"nested":{"value":1}}}`,
-		"stack trace key":          `{` + base + `,"context":{"stack_trace":"secret"}}`,
-		"stack trace value":        `{` + base + `,"context":{"detail":" at App.Service.Runner"}}`,
+		"null context":            `{` + base + `,"context":null}`,
+		"array context":           `{` + base + `,"context":[]}`,
+		"nested context":          `{` + base + `,"context":{"nested":{"value":1}}}`,
+		"stack trace key":         `{` + base + `,"context":{"stack_trace":"secret"}}`,
+		"stack trace value":       `{` + base + `,"context":{"detail":" at App.Service.Runner"}}`,
 	}
 	for name, raw := range tests {
 		t.Run(name, func(t *testing.T) {
