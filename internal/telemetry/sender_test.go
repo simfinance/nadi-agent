@@ -872,3 +872,52 @@ func TestBuildPendingNeverCutsOneSpoolEventAtTheRecordLimit(t *testing.T) {
 		}
 	}
 }
+
+
+func TestSendRetainsPendingBatchWhenCentralACKIsInvalid(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{
+			"success":true,
+			"data":{
+				"success":true,
+				"batch_id":"33333333-3333-4333-8333-333333333333",
+				"status":"accepted",
+				"record_count":1,
+				"accepted_count":1,
+				"duplicate_count":0,
+				"rejected_count":0,
+				"replayed":false
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	directory := t.TempDir()
+	sender, err := NewSender(server.URL, directory, time.Second)
+	if err != nil {
+		t.Fatalf("create sender: %v", err)
+	}
+	sender.client = server.Client()
+
+	applicationID := "11111111-1111-4111-8111-111111111111"
+	sources, err := sender.Send(context.Background(), "agent-1", "22222222-2222-4222-8222-222222222222", "credential", []InputRecord{{
+		Stream:        "application_metrics",
+		ApplicationID: &applicationID,
+		Data:          json.RawMessage(`{}`),
+		Source: Source{
+			Kind:          "application",
+			ApplicationID: applicationID,
+			EventID:       "invalid-ack-event",
+		},
+	}})
+	if err == nil {
+		t.Fatal("expected mismatched Central batch ID to be rejected")
+	}
+	if len(sources) != 0 {
+		t.Fatalf("invalid ACK must not acknowledge local sources: %#v", sources)
+	}
+	if _, err := os.Stat(filepath.Join(directory, "pending-batch.json")); err != nil {
+		t.Fatalf("pending batch was removed after invalid ACK: %v", err)
+	}
+}
