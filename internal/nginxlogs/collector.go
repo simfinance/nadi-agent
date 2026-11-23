@@ -197,7 +197,11 @@ func (c *Collector) CollectWithCursor(now time.Time) (Snapshot, Cursor, error) {
 		}
 
 		line := string(content[consumed:lineEnd])
-		if entry, valid := parseLine(line); valid {
+		if linePattern.MatchString(strings.TrimSpace(line)) {
+			entry, valid := parseLine(line)
+			if !valid {
+				return Snapshot{}, Cursor{}, errors.New("Nginx error log entry failed schema validation; cursor was not advanced")
+			}
 			snapshot.Entries = append(snapshot.Entries, entry)
 		}
 		consumed += lineLength
