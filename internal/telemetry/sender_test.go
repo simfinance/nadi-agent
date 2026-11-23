@@ -191,21 +191,20 @@ func TestBuildPendingRejectsServerMetricsWithApplicationID(t *testing.T) {
 	}
 }
 
-
 func TestRequiredCapabilityMatchesCentralV11StreamMatrix(t *testing.T) {
 	expected := map[string]string{
-		"server_metrics":        "server_metrics",
-		"nginx_metrics":         "server_metrics",
-		"nginx_vhost_metrics":   "server_metrics",
-		"nginx_error_logs":      "system_logs",
-		"application_metrics":   "application_metrics",
-		"application_logs":      "application_logs",
-		"database_metrics":      "database_monitoring",
-		"database_connections":  "database_monitoring",
-		"queue_metrics":         "queue_monitoring",
-		"queue_jobs":            "queue_monitoring",
-		"scheduler_metrics":     "scheduler_monitoring",
-		"scheduler_events":      "scheduler_monitoring",
+		"server_metrics":       "server_metrics",
+		"nginx_metrics":        "server_metrics",
+		"nginx_vhost_metrics":  "server_metrics",
+		"nginx_error_logs":     "system_logs",
+		"application_metrics":  "application_metrics",
+		"application_logs":     "application_logs",
+		"database_metrics":     "database_monitoring",
+		"database_connections": "database_monitoring",
+		"queue_metrics":        "queue_monitoring",
+		"queue_jobs":           "queue_monitoring",
+		"scheduler_metrics":    "scheduler_monitoring",
+		"scheduler_events":     "scheduler_monitoring",
 	}
 
 	for stream, capability := range expected {

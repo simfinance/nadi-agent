@@ -44,10 +44,10 @@ var (
 	}
 
 	serverStreams = map[string]struct{}{
-		"server_metrics":       {},
-		"nginx_metrics":        {},
-		"nginx_vhost_metrics":  {},
-		"nginx_error_logs":     {},
+		"server_metrics":      {},
+		"nginx_metrics":       {},
+		"nginx_vhost_metrics": {},
+		"nginx_error_logs":    {},
 	}
 )
 
