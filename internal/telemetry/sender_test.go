@@ -818,7 +818,6 @@ func TestDiscardPendingQuarantinesEverySplitChildDurably(t *testing.T) {
 	}
 }
 
-
 func TestBuildPendingNeverCutsOneSpoolEventAtTheRecordLimit(t *testing.T) {
 	sender, err := NewSender("https://central.example", t.TempDir(), time.Second)
 	if err != nil {
