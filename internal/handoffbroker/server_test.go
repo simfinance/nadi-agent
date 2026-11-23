@@ -1,222 +1,222 @@
 package handoffbroker
 
 import (
-    "encoding/json"
-    "strings"
-    "testing"
-    "time"
+	"encoding/json"
+	"strings"
+	"testing"
+	"time"
 )
 
 func TestDecodeRequestRejectsDuplicateKeys(t *testing.T) {
-    payload := []byte(`{"protocol_version":1,"protocol_version":1,"operation":"publish_activation_state"}`)
+	payload := []byte(`{"protocol_version":1,"protocol_version":1,"operation":"publish_activation_state"}`)
 
-    if _, err := decodeRequest(payload); err == nil {
-        t.Fatal("expected duplicate JSON key to be rejected")
-    }
+	if _, err := decodeRequest(payload); err == nil {
+		t.Fatal("expected duplicate JSON key to be rejected")
+	}
 }
 
 func TestDecodeRequestRejectsUnknownFields(t *testing.T) {
-    payload := []byte(`{"protocol_version":1,"operation":"publish_activation_state","application_id":"app","application_key":"key","unexpected":"value"}`)
+	payload := []byte(`{"protocol_version":1,"operation":"publish_activation_state","application_id":"app","application_key":"key","unexpected":"value"}`)
 
-    if _, err := decodeRequest(payload); err == nil {
-        t.Fatal("expected unknown JSON field to be rejected")
-    }
+	if _, err := decodeRequest(payload); err == nil {
+		t.Fatal("expected unknown JSON field to be rejected")
+	}
 }
 
 func TestDecodeRequestRejectsTrailingValues(t *testing.T) {
-    payload := []byte(`{"protocol_version":1} {}`)
+	payload := []byte(`{"protocol_version":1} {}`)
 
-    if _, err := decodeRequest(payload); err == nil {
-        t.Fatal("expected trailing JSON value to be rejected")
-    }
+	if _, err := decodeRequest(payload); err == nil {
+		t.Fatal("expected trailing JSON value to be rejected")
+	}
 }
 
 func TestValidateActivationRequestAcceptsActiveGrantCapabilities(t *testing.T) {
-    now := time.Now().UTC()
-    request := Request{
-        ProtocolVersion: 1,
-        Operation: "publish_activation_state",
-        ApplicationID: "app-1",
-        ApplicationKey: "stable-key",
-        ActivationState: "active",
-        MonitoringEnabled: true,
-        GrantAcknowledged: true,
-        Capabilities: []string{"application_metrics", "database_monitoring"},
-        ObservedAt: now.Format(time.RFC3339),
-        ValidUntil: now.Add(MaximumAssertionLifetime).Format(time.RFC3339),
-    }
+	now := time.Now().UTC()
+	request := Request{
+		ProtocolVersion:   1,
+		Operation:         "publish_activation_state",
+		ApplicationID:     "app-1",
+		ApplicationKey:    "stable-key",
+		ActivationState:   "active",
+		MonitoringEnabled: true,
+		GrantAcknowledged: true,
+		Capabilities:      []string{"application_metrics", "database_monitoring"},
+		ObservedAt:        now.Format(time.RFC3339),
+		ValidUntil:        now.Add(MaximumAssertionLifetime).Format(time.RFC3339),
+	}
 
-    if err := validateActivationRequest(request, now); err != nil {
-        t.Fatalf("valid active assertion was rejected: %v", err)
-    }
+	if err := validateActivationRequest(request, now); err != nil {
+		t.Fatalf("valid active assertion was rejected: %v", err)
+	}
 }
 
 func TestValidateActivationRequestRejectsBridgeCapabilityNames(t *testing.T) {
-    now := time.Now().UTC()
-    request := Request{
-        ProtocolVersion: 1,
-        Operation: "publish_activation_state",
-        ApplicationID: "app-1",
-        ApplicationKey: "stable-key",
-        ActivationState: "active",
-        MonitoringEnabled: true,
-        GrantAcknowledged: true,
-        Capabilities: []string{"health"},
-        ObservedAt: now.Format(time.RFC3339),
-        ValidUntil: now.Add(time.Minute).Format(time.RFC3339),
-    }
+	now := time.Now().UTC()
+	request := Request{
+		ProtocolVersion:   1,
+		Operation:         "publish_activation_state",
+		ApplicationID:     "app-1",
+		ApplicationKey:    "stable-key",
+		ActivationState:   "active",
+		MonitoringEnabled: true,
+		GrantAcknowledged: true,
+		Capabilities:      []string{"health"},
+		ObservedAt:        now.Format(time.RFC3339),
+		ValidUntil:        now.Add(time.Minute).Format(time.RFC3339),
+	}
 
-    if err := validateActivationRequest(request, now); err == nil {
-        t.Fatal("Bridge endpoint capability must not be accepted as a Central grant capability")
-    }
+	if err := validateActivationRequest(request, now); err == nil {
+		t.Fatal("Bridge endpoint capability must not be accepted as a Central grant capability")
+	}
 }
 
 func TestValidateActivationRequestRejectsActiveWithoutAcknowledgement(t *testing.T) {
-    now := time.Now().UTC()
-    request := Request{
-        ProtocolVersion: 1,
-        Operation: "publish_activation_state",
-        ApplicationID: "app-1",
-        ApplicationKey: "stable-key",
-        ActivationState: "active",
-        MonitoringEnabled: true,
-        GrantAcknowledged: false,
-        Capabilities: []string{"application_metrics"},
-        ObservedAt: now.Format(time.RFC3339),
-        ValidUntil: now.Add(time.Minute).Format(time.RFC3339),
-    }
+	now := time.Now().UTC()
+	request := Request{
+		ProtocolVersion:   1,
+		Operation:         "publish_activation_state",
+		ApplicationID:     "app-1",
+		ApplicationKey:    "stable-key",
+		ActivationState:   "active",
+		MonitoringEnabled: true,
+		GrantAcknowledged: false,
+		Capabilities:      []string{"application_metrics"},
+		ObservedAt:        now.Format(time.RFC3339),
+		ValidUntil:        now.Add(time.Minute).Format(time.RFC3339),
+	}
 
-    if err := validateActivationRequest(request, now); err == nil {
-        t.Fatal("active assertion without accepted grant acknowledgement must be rejected")
-    }
+	if err := validateActivationRequest(request, now); err == nil {
+		t.Fatal("active assertion without accepted grant acknowledgement must be rejected")
+	}
 }
 
 func TestValidateActivationRequestRejectsExpiredLease(t *testing.T) {
-    now := time.Now().UTC()
-    request := Request{
-        ProtocolVersion: 1,
-        Operation: "publish_activation_state",
-        ApplicationID: "app-1",
-        ApplicationKey: "stable-key",
-        ActivationState: "unknown",
-        Capabilities: []string{},
-        ObservedAt: now.Add(-10 * time.Minute).Format(time.RFC3339),
-        ValidUntil: now.Add(-5 * time.Minute).Format(time.RFC3339),
-    }
+	now := time.Now().UTC()
+	request := Request{
+		ProtocolVersion: 1,
+		Operation:       "publish_activation_state",
+		ApplicationID:   "app-1",
+		ApplicationKey:  "stable-key",
+		ActivationState: "unknown",
+		Capabilities:    []string{},
+		ObservedAt:      now.Add(-10 * time.Minute).Format(time.RFC3339),
+		ValidUntil:      now.Add(-5 * time.Minute).Format(time.RFC3339),
+	}
 
-    if err := validateActivationRequest(request, now); err == nil {
-        t.Fatal("expired assertion must be rejected")
-    }
+	if err := validateActivationRequest(request, now); err == nil {
+		t.Fatal("expired assertion must be rejected")
+	}
 }
 
 func TestValidateConfigRejectsCredentialPathOutsideApplication(t *testing.T) {
-    config := Config{
-        SchemaVersion: 1,
-        AgentUID: 1001,
-        AgentGID: 1001,
-        Applications: []Mapping{
-            {
-                ApplicationID: "app-1",
-                ApplicationKey: "stable-key",
-                BasePath: "/srv/www/app",
-                RuntimeUID: 33,
-                RuntimeGID: 33,
-                CredentialFile: "/etc/nadi-agent/credential",
-                ActivationStateFile: "/run/nadi-agent/bridge-state/app-1.json",
-            },
-        },
-    }
+	config := Config{
+		SchemaVersion: 1,
+		AgentUID:      1001,
+		AgentGID:      1001,
+		Applications: []Mapping{
+			{
+				ApplicationID:       "app-1",
+				ApplicationKey:      "stable-key",
+				BasePath:            "/srv/www/app",
+				RuntimeUID:          33,
+				RuntimeGID:          33,
+				CredentialFile:      "/etc/nadi-agent/credential",
+				ActivationStateFile: "/run/nadi-agent/bridge-state/app-1.json",
+			},
+		},
+	}
 
-    if err := validateConfig(config); err == nil {
-        t.Fatal("credential path outside the application base path must be rejected")
-    }
+	if err := validateConfig(config); err == nil {
+		t.Fatal("credential path outside the application base path must be rejected")
+	}
 }
 
 func TestValidateConfigRejectsDuplicateApplicationMappings(t *testing.T) {
-    mapping := Mapping{
-        ApplicationID: "app-1",
-        ApplicationKey: "stable-key",
-        BasePath: "/srv/www/app",
-        RuntimeUID: 33,
-        RuntimeGID: 33,
-        CredentialFile: "/srv/www/app/storage/app/private/nadi/credential",
-        ActivationStateFile: "/run/nadi-agent/bridge-state/app-1.json",
-    }
+	mapping := Mapping{
+		ApplicationID:       "app-1",
+		ApplicationKey:      "stable-key",
+		BasePath:            "/srv/www/app",
+		RuntimeUID:          33,
+		RuntimeGID:          33,
+		CredentialFile:      "/srv/www/app/storage/app/private/nadi/credential",
+		ActivationStateFile: "/run/nadi-agent/bridge-state/app-1.json",
+	}
 
-    config := Config{
-        SchemaVersion: 1,
-        AgentUID: 1001,
-        AgentGID: 1001,
-        Applications: []Mapping{mapping, mapping},
-    }
+	config := Config{
+		SchemaVersion: 1,
+		AgentUID:      1001,
+		AgentGID:      1001,
+		Applications:  []Mapping{mapping, mapping},
+	}
 
-    if err := validateConfig(config); err == nil {
-        t.Fatal("duplicate application mapping must be rejected")
-    }
+	if err := validateConfig(config); err == nil {
+		t.Fatal("duplicate application mapping must be rejected")
+	}
 }
 
 func TestValidateConfigAcceptsPerApplicationRuntimeMapping(t *testing.T) {
-    config := Config{
-        SchemaVersion: 1,
-        AgentUID: 1001,
-        AgentGID: 1001,
-        Applications: []Mapping{
-            {
-                ApplicationID: "app-1",
-                ApplicationKey: "stable-key",
-                BasePath: "/srv/www/app",
-                RuntimeUID: 33,
-                RuntimeGID: 33,
-                CredentialFile: "/srv/www/app/storage/app/private/nadi/credential",
-                ActivationStateFile: "/run/nadi-agent/bridge-state/app-1.json",
-            },
-        },
-    }
+	config := Config{
+		SchemaVersion: 1,
+		AgentUID:      1001,
+		AgentGID:      1001,
+		Applications: []Mapping{
+			{
+				ApplicationID:       "app-1",
+				ApplicationKey:      "stable-key",
+				BasePath:            "/srv/www/app",
+				RuntimeUID:          33,
+				RuntimeGID:          33,
+				CredentialFile:      "/srv/www/app/storage/app/private/nadi/credential",
+				ActivationStateFile: "/run/nadi-agent/bridge-state/app-1.json",
+			},
+		},
+	}
 
-    if err := validateConfig(config); err != nil {
-        t.Fatalf("valid mapping was rejected: %v", err)
-    }
+	if err := validateConfig(config); err != nil {
+		t.Fatalf("valid mapping was rejected: %v", err)
+	}
 }
 
 func TestResponseNeverIncludesRawCredential(t *testing.T) {
-    response := Response{
-        ProtocolVersion: 1,
-        Success: false,
-        ApplicationID: "app-1",
-        ErrorCode: "credential_publish_failed",
-    }
+	response := Response{
+		ProtocolVersion: 1,
+		Success:         false,
+		ApplicationID:   "app-1",
+		ErrorCode:       "credential_publish_failed",
+	}
 
-    encoded, err := json.Marshal(response)
-    if err != nil {
-        t.Fatal(err)
-    }
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-    if strings.Contains(string(encoded), "central-issued-secret") {
-        t.Fatal("response unexpectedly contains credential material")
-    }
+	if strings.Contains(string(encoded), "central-issued-secret") {
+		t.Fatal("response unexpectedly contains credential material")
+	}
 }
 
 func TestValidateMonotonicObservationRejectsOlderUpdate(t *testing.T) {
-    previous := "2026-11-23T10:00:00Z"
-    next := "2026-11-23T09:59:59Z"
+	previous := "2026-11-23T10:00:00Z"
+	next := "2026-11-23T09:59:59Z"
 
-    if err := validateMonotonicObservation(previous, next); err == nil {
-        t.Fatal("older activation assertion must be rejected")
-    }
+	if err := validateMonotonicObservation(previous, next); err == nil {
+		t.Fatal("older activation assertion must be rejected")
+	}
 }
 
 func TestDecodeRequestRejectsCredentialFieldsOnActivationOperation(t *testing.T) {
-    payload := []byte(`{"protocol_version":1,"operation":"publish_activation_state","application_id":"app-1","application_key":"stable-key","activation_state":"unknown","monitoring_enabled":false,"grant_acknowledged":false,"capabilities":[],"observed_at":"2026-11-23T10:00:00Z","valid_until":"2026-11-23T10:05:00Z","credential":"unexpected"}`)
+	payload := []byte(`{"protocol_version":1,"operation":"publish_activation_state","application_id":"app-1","application_key":"stable-key","activation_state":"unknown","monitoring_enabled":false,"grant_acknowledged":false,"capabilities":[],"observed_at":"2026-11-23T10:00:00Z","valid_until":"2026-11-23T10:05:00Z","credential":"unexpected"}`)
 
-    if _, err := decodeRequest(payload); err == nil {
-        t.Fatal("credential field must not be accepted on activation operation")
-    }
+	if _, err := decodeRequest(payload); err == nil {
+		t.Fatal("credential field must not be accepted on activation operation")
+	}
 }
 
 func TestDecodeRequestRequiresExplicitCapabilitiesArray(t *testing.T) {
-    payload := []byte(`{"protocol_version":1,"operation":"publish_activation_state","application_id":"app-1","application_key":"stable-key","activation_state":"unknown","monitoring_enabled":false,"grant_acknowledged":false,"observed_at":"2026-11-23T10:00:00Z","valid_until":"2026-11-23T10:05:00Z"}`)
+	payload := []byte(`{"protocol_version":1,"operation":"publish_activation_state","application_id":"app-1","application_key":"stable-key","activation_state":"unknown","monitoring_enabled":false,"grant_acknowledged":false,"observed_at":"2026-11-23T10:00:00Z","valid_until":"2026-11-23T10:05:00Z"}`)
 
-    if _, err := decodeRequest(payload); err == nil {
-        t.Fatal("activation request must include the capabilities array")
-    }
+	if _, err := decodeRequest(payload); err == nil {
+		t.Fatal("activation request must include the capabilities array")
+	}
 }

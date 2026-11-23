@@ -42,16 +42,16 @@ type PendingAcknowledgement struct {
 }
 
 type EnrolledApplication struct {
-	ApplicationID         string `json:"application_id"`
-	ApplicationKey        string `json:"application_key"`
-	ApplicationName       string `json:"application_name"`
-	Environment           string `json:"environment"`
-	RegistrationID        string `json:"registration_id"`
-	RegistrationStatus    string `json:"registration_status"`
-	ActivationStatus      string `json:"activation_status"`
-	MonitoringStatus      string `json:"monitoring_status"`
-	Endpoint              string `json:"endpoint"`
-	ApplicationCredential      string `json:"application_credential"`
+	ApplicationID             string `json:"application_id"`
+	ApplicationKey            string `json:"application_key"`
+	ApplicationName           string `json:"application_name"`
+	Environment               string `json:"environment"`
+	RegistrationID            string `json:"registration_id"`
+	RegistrationStatus        string `json:"registration_status"`
+	ActivationStatus          string `json:"activation_status"`
+	MonitoringStatus          string `json:"monitoring_status"`
+	Endpoint                  string `json:"endpoint"`
+	ApplicationCredential     string `json:"application_credential"`
 	BridgeCredentialPublished bool   `json:"bridge_credential_published,omitempty"`
 }
 
