@@ -267,16 +267,6 @@ func TestHandleConnectionRejectsUnexpectedPeerUID(t *testing.T) {
 	}
 	defer connection.Close()
 
-	_, err = connection.Write([]byte(`{"protocol_version":1,"operation":"publish_application_credential","application_id":"app-1","application_key":"stable-key","credential":"secret"}` + "\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	unixConnection := connection.(*net.UnixConn)
-	if err := unixConnection.CloseWrite(); err != nil {
-		t.Fatal(err)
-	}
-
 	responseBytes, err := io.ReadAll(connection)
 	if err != nil {
 		t.Fatal(err)
