@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -165,6 +166,7 @@ func (a *App) runControlPoll(ctx context.Context, store *state.Store, agentState
 			}
 		}
 
+		pollImmediately := false
 		pollData, err := a.controlHTTP.Poll(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -229,7 +231,12 @@ func (a *App) runControlPoll(ctx context.Context, store *state.Store, agentState
 					}
 				}
 				if err := a.deliverTelemetry(ctx, latestState, serverMetricsAllowed, gateDecisions); err != nil {
-					a.logger.Warn("Central telemetry delivery remains pending; local spool is retained", "error", err)
+					if errors.Is(err, ErrControlPollRequired) {
+						pollImmediately = true
+						a.logger.Warn("Central returned HTTP 410 for telemetry scope; Control Poll will be refreshed immediately")
+					} else {
+						a.logger.Warn("Central telemetry delivery remains pending; local spool is retained", "error", err)
+					}
 				}
 			}
 		}
@@ -241,7 +248,7 @@ func (a *App) runControlPoll(ctx context.Context, store *state.Store, agentState
 			)
 		}
 
-		if !wait(ctx, a.config.PollInterval) {
+		if !pollImmediately && !wait(ctx, a.config.PollInterval) {
 			break
 		}
 	}
