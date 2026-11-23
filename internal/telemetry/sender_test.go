@@ -651,3 +651,84 @@ func TestSendQuarantinesSingleOversizedRecordWithoutRetry(t *testing.T) {
 		t.Fatalf("oversized record quarantine was not durable: %v", err)
 	}
 }
+
+
+func TestSplitDoesNotAcknowledgeSharedSpoolEventBeforeAllChildBatches(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requestCount++
+		var batch Batch
+		if err := json.NewDecoder(request.Body).Decode(&batch); err != nil {
+			t.Fatalf("decode batch: %v", err)
+		}
+		if requestCount == 1 {
+			writer.WriteHeader(http.StatusRequestEntityTooLarge)
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(
+			writer,
+			`{"success":true,"data":{"success":true,"batch_id":"%s","status":"accepted","record_count":1,"accepted_count":1,"duplicate_count":0,"rejected_count":0,"replayed":false}}`,
+			batch.BatchID,
+		)
+	}))
+	defer server.Close()
+
+	directory := t.TempDir()
+	sender, err := NewSender(server.URL, directory, time.Second)
+	if err != nil {
+		t.Fatalf("create sender: %v", err)
+	}
+	sender.client = server.Client()
+
+	applicationID := "11111111-1111-4111-8111-111111111111"
+	sharedSource := Source{
+		Kind:          "application",
+		ApplicationID: applicationID,
+		EventID:       "one-spool-event",
+	}
+	inputs := []InputRecord{
+		{
+			Stream:        "application_metrics",
+			ApplicationID: &applicationID,
+			Data:          json.RawMessage(`{"health":true}`),
+			Source:        sharedSource,
+		},
+		{
+			Stream:        "database_metrics",
+			ApplicationID: &applicationID,
+			Data:          json.RawMessage(`{"connections":2}`),
+			Source:        sharedSource,
+		},
+	}
+
+	if _, err := sender.Send(context.Background(), "agent-1", "22222222-2222-4222-8222-222222222222", "credential", inputs); err != nil {
+		t.Fatalf("split original batch: %v", err)
+	}
+	firstAcknowledgement, err := sender.Send(context.Background(), "agent-1", "22222222-2222-4222-8222-222222222222", "credential", nil)
+	if err != nil {
+		t.Fatalf("send first split child: %v", err)
+	}
+	if len(firstAcknowledgement) != 0 {
+		t.Fatalf("shared spool event was acknowledged before its final child: %#v", firstAcknowledgement)
+	}
+
+	pendingSources, hasPending, err := sender.PendingSources()
+	if err != nil {
+		t.Fatalf("inspect second split child: %v", err)
+	}
+	if !hasPending || len(pendingSources) != 1 || pendingSources[0].EventID != sharedSource.EventID {
+		t.Fatalf("shared source was not retained across split children: %#v", pendingSources)
+	}
+
+	finalAcknowledgement, err := sender.Send(context.Background(), "agent-1", "22222222-2222-4222-8222-222222222222", "credential", nil)
+	if err != nil {
+		t.Fatalf("send final split child: %v", err)
+	}
+	if len(finalAcknowledgement) != 1 || finalAcknowledgement[0].EventID != sharedSource.EventID {
+		t.Fatalf("expected one final source acknowledgement, got %#v", finalAcknowledgement)
+	}
+	if err := sender.Complete(); err != nil {
+		t.Fatalf("complete final split child: %v", err)
+	}
+}
