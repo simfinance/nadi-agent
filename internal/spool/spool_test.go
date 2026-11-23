@@ -158,12 +158,6 @@ func TestAppendNginxErrorLogsPersistsServerScopedEvent(t *testing.T) {
 		t.Fatalf("append Nginx error log: %v", err)
 	}
 
-	reopened, err := Open(filepath.Join(filepath.Dir(store.path), "spool-reopened"), 1024*1024, 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = reopened
-
 	records, err := store.ReadBatch(10)
 	if err != nil {
 		t.Fatal(err)
