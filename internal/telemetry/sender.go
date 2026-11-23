@@ -9,11 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -26,19 +28,57 @@ const (
 )
 
 var (
-	uuidPattern    = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$`)
-	allowedStreams = map[string]struct{}{
-		"server_metrics":            {},
-		"nginx_metrics":             {},
-		"nginx_vhost_metrics":       {},
-		"nginx_access_logs":         {},
-		"nginx_error_logs":          {},
-		"application_metrics":       {},
-		"application_logs":          {},
-		"application_events":        {},
-		"nginx_http_requests":       {},
-		"application_http_requests": {},
-		"application_http_errors":   {},
+	uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}package telemetry
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"math/rand"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+)
+
+const (
+	EndpointPath        = "/api/v1/nadi/agent/telemetry/batches"
+	MaximumBatchBytes   = 1024 * 1024
+	MaximumRecordBytes  = 64 * 1024
+	MaximumBatchRecords = 500
+)
+
+)
+
+	streamCapabilities = map[string]string{
+		"server_metrics":        "server_metrics",
+		"nginx_metrics":         "server_metrics",
+		"nginx_vhost_metrics":   "server_metrics",
+		"nginx_error_logs":      "system_logs",
+		"application_metrics":   "application_metrics",
+		"application_logs":      "application_logs",
+		"database_metrics":      "database_monitoring",
+		"database_connections":  "database_monitoring",
+		"queue_metrics":         "queue_monitoring",
+		"queue_jobs":             "queue_monitoring",
+		"scheduler_metrics":     "scheduler_monitoring",
+		"scheduler_events":      "scheduler_monitoring",
+	}
+
+	serverStreams = map[string]struct{}{
+		"server_metrics":      {},
+		"nginx_metrics":       {},
+		"nginx_vhost_metrics": {},
+		"nginx_error_logs":    {},
 	}
 )
 
@@ -56,6 +96,7 @@ type Source struct {
 	Kind          string `json:"kind"`
 	ApplicationID string `json:"application_id,omitempty"`
 	EventID       string `json:"event_id"`
+	Quarantined   bool   `json:"quarantined,omitempty"`
 }
 
 type Record struct {
@@ -78,8 +119,26 @@ type Batch struct {
 }
 
 type pendingBatch struct {
-	Batch   Batch    `json:"batch"`
-	Sources []Source `json:"sources"`
+	Batch     Batch          `json:"batch"`
+	Sources   []Source        `json:"sources"`
+	Following []pendingBatch `json:"following,omitempty"`
+}
+
+type QuarantineEntry struct {
+	QuarantinedAt time.Time   `json:"quarantined_at"`
+	StatusCode    int         `json:"status_code"`
+	Reason        string      `json:"reason"`
+	Pending       pendingBatch `json:"pending"`
+}
+
+type HTTPStatusError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *HTTPStatusError) Error() string
+{
+	return fmt.Sprintf("Central telemetry endpoint returned HTTP %d: %s", e.StatusCode, e.Message)
 }
 
 type sequenceState struct {
@@ -133,6 +192,18 @@ func NewSender(baseURL string, directory string, timeout time.Duration) (*Sender
 	}, nil
 }
 
+func RequiredCapability(stream string) (string, bool)
+{
+	capability, found := streamCapabilities[stream]
+	return capability, found
+}
+
+func IsServerStream(stream string) bool
+{
+	_, found := serverStreams[stream]
+	return found
+}
+
 func (s *Sender) Send(ctx context.Context, agentID string, instanceID string, credential string, inputs []InputRecord) ([]Source, error) {
 	if strings.TrimSpace(agentID) == "" || strings.TrimSpace(instanceID) == "" || strings.TrimSpace(credential) == "" {
 		return nil, errors.New("Agent ID, Agent instance ID, and credential are required for telemetry delivery")
@@ -166,49 +237,113 @@ func (s *Sender) Send(ctx context.Context, agentID string, instanceID string, cr
 		return nil, fmt.Errorf("pending telemetry batch exceeds %d bytes", MaximumBatchBytes)
 	}
 
-	requestID, err := newUUID()
-	if err != nil {
-		return nil, err
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, s.baseURL+EndpointPath, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("create telemetry request: %w", err)
-	}
-	request.Header.Set("Authorization", "Bearer "+credential)
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Accept", "application/json")
-	request.Header.Set("X-NADI-Agent-ID", agentID)
-	request.Header.Set("X-NADI-Request-ID", requestID)
+	for attempt := 0; attempt < 4; attempt++ {
+		requestID, err := newUUID()
+		if err != nil {
+			return nil, err
+		}
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, s.baseURL+EndpointPath, bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("create telemetry request: %w", err)
+		}
+		request.Header.Set("Authorization", "Bearer "+credential)
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Accept", "application/json")
+		request.Header.Set("X-NADI-Agent-ID", agentID)
+		request.Header.Set("X-NADI-Request-ID", requestID)
 
-	response, err := s.client.Do(request)
-	if err != nil {
-		return nil, fmt.Errorf("send telemetry batch: %w", err)
-	}
-	defer response.Body.Close()
+		response, requestErr := s.client.Do(request)
+		if requestErr != nil {
+			if attempt == 3 {
+				return nil, fmt.Errorf("send telemetry batch after bounded retries: %w", requestErr)
+			}
+			if err := waitRetry(ctx, exponentialBackoff(attempt)); err != nil {
+				return nil, err
+			}
+			continue
+		}
 
-	responseBody, err := io.ReadAll(io.LimitReader(response.Body, 64*1024+1))
-	if err != nil || len(responseBody) > 64*1024 {
-		return nil, errors.New("Central telemetry response is unreadable or oversized")
-	}
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Central telemetry endpoint returned HTTP %d", response.StatusCode)
+		responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, 64*1024+1))
+		response.Body.Close()
+		if readErr != nil || len(responseBody) > 64*1024 {
+			return nil, errors.New("Central telemetry response is unreadable or oversized")
+		}
+
+		switch response.StatusCode {
+		case http.StatusOK:
+			var ack Ack
+			if err := json.Unmarshal(responseBody, &ack); err != nil {
+				return nil, fmt.Errorf("decode Central telemetry acknowledgement: %w", err)
+			}
+			if !ack.Success || !ack.Data.Success || ack.Data.Status != "accepted" || ack.Data.BatchID != pending.Batch.BatchID || ack.Data.RejectedCount != 0 {
+				return nil, errors.New("Central telemetry acknowledgement did not confirm acceptance of the pending batch")
+			}
+			if ack.Data.RecordCount != len(pending.Batch.Records) || ack.Data.AcceptedCount+ack.Data.DuplicateCount != len(pending.Batch.Records) {
+				return nil, errors.New("Central telemetry acknowledgement counts do not match the pending batch")
+			}
+			return pending.Sources, nil
+
+		case http.StatusForbidden, http.StatusConflict, http.StatusGone, http.StatusUnprocessableEntity:
+			if err := s.quarantinePending(response.StatusCode, string(responseBody)); err != nil {
+				return nil, fmt.Errorf("quarantine permanent Central telemetry rejection: %w", err)
+			}
+			sources := markQuarantined(pending.Sources)
+			return sources, nil
+
+		case http.StatusRequestEntityTooLarge:
+			if len(pending.Batch.Records) == 1 {
+				if err := s.quarantinePending(response.StatusCode, "single telemetry record exceeds Central payload limits"); err != nil {
+					return nil, fmt.Errorf("quarantine oversized telemetry record: %w", err)
+				}
+				return markQuarantined(pending.Sources), nil
+			}
+			if err := s.splitPending(*pending); err != nil {
+				return nil, fmt.Errorf("persist split telemetry batches after HTTP 413: %w", err)
+			}
+			return nil, nil
+
+		case http.StatusTooManyRequests, http.StatusServiceUnavailable:
+			if attempt == 3 {
+				return nil, &HTTPStatusError{
+					StatusCode: response.StatusCode,
+					Message:    "bounded retry limit reached; pending batch retained",
+				}
+			}
+			delay := exponentialBackoff(attempt)
+			if response.StatusCode == http.StatusTooManyRequests {
+				if retryAfter := parseRetryAfter(response.Header.Get("Retry-After"), time.Now()); retryAfter > delay {
+					delay = retryAfter
+				}
+			}
+			if err := waitRetry(ctx, delay); err != nil {
+				return nil, err
+			}
+
+		default:
+			return nil, &HTTPStatusError{
+				StatusCode: response.StatusCode,
+				Message:    strings.TrimSpace(string(responseBody)),
+			}
+		}
 	}
 
-	var ack Ack
-	if err := json.Unmarshal(responseBody, &ack); err != nil {
-		return nil, fmt.Errorf("decode Central telemetry acknowledgement: %w", err)
-	}
-	if !ack.Success || !ack.Data.Success || ack.Data.Status != "accepted" || ack.Data.BatchID != pending.Batch.BatchID || ack.Data.RejectedCount != 0 {
-		return nil, errors.New("Central telemetry acknowledgement did not confirm acceptance of the pending batch")
-	}
-	if ack.Data.RecordCount != len(pending.Batch.Records) || ack.Data.AcceptedCount+ack.Data.DuplicateCount != len(pending.Batch.Records) {
-		return nil, errors.New("Central telemetry acknowledgement counts do not match the pending batch")
-	}
-	return pending.Sources, nil
-}
+	return nil, errors.New("telemetry delivery ended without a result")
 
 func (s *Sender) Complete() error {
-	return s.removePending()
+	pending, err := s.loadPending()
+	if err != nil {
+		return err
+	}
+	if pending == nil {
+		return nil
+	}
+	if len(pending.Following) == 0 {
+		return s.removePending()
+	}
+
+	next := pending.Following[0]
+	next.Following = append([]pendingBatch(nil), pending.Following[1:]...)
+	return s.savePending(next)
 }
 
 func (s *Sender) PendingSources() ([]Source, bool, error) {
@@ -219,7 +354,11 @@ func (s *Sender) PendingSources() ([]Source, bool, error) {
 	if pending == nil {
 		return nil, false, nil
 	}
-	return append([]Source(nil), pending.Sources...), true, nil
+	sources := append([]Source(nil), pending.Sources...)
+	for _, following := range pending.Following {
+		sources = append(sources, following.Sources...)
+	}
+	return sources, true, nil
 }
 
 func (s *Sender) DiscardPending() error {
@@ -227,9 +366,10 @@ func (s *Sender) DiscardPending() error {
 }
 
 func (s *Sender) buildPending(instanceID string, inputs []InputRecord) (*pendingBatch, error) {
-	if len(inputs) > MaximumBatchRecords {
-		inputs = inputs[:MaximumBatchRecords]
+	if len(inputs) == 0 {
+		return nil, nil
 	}
+
 	sequences, err := s.loadSequences()
 	if err != nil {
 		return nil, err
@@ -243,41 +383,63 @@ func (s *Sender) buildPending(instanceID string, inputs []InputRecord) (*pending
 		BatchID:         batchID,
 		AgentInstanceID: instanceID,
 		SentAt:          time.Now().UTC(),
-		Records:         make([]Record, 0, len(inputs)),
+		Records:         make([]Record, 0, min(len(inputs), MaximumBatchRecords)),
 	}
-	sources := make([]Source, 0, len(inputs))
+	sources := make([]Source, 0, cap(batch.Records))
+	scopeKey := ""
+
 	for _, input := range inputs {
-		if _, supported := allowedStreams[input.Stream]; !supported {
+		capability, supported := RequiredCapability(input.Stream)
+		if !supported {
 			return nil, fmt.Errorf("unsupported Central telemetry stream %q", input.Stream)
 		}
+		_ = capability
+
 		if len(input.Data) == 0 || !json.Valid(input.Data) {
 			return nil, errors.New("telemetry input contains invalid data JSON")
-		}
-		if strings.HasPrefix(input.Stream, "application_") && (input.ApplicationID == nil || !uuidPattern.MatchString(*input.ApplicationID)) {
-			return nil, errors.New("application telemetry requires a valid application_id UUID")
-		}
-		if input.Stream == "server_metrics" && input.ApplicationID != nil {
-			return nil, errors.New("server_metrics must not contain application_id")
-		}
-		if input.ApplicationID != nil && !uuidPattern.MatchString(*input.ApplicationID) {
-			return nil, errors.New("telemetry application_id must be a UUID")
-		}
-		if input.MetricSet != nil && len(*input.MetricSet) > 100 {
-			return nil, errors.New("telemetry metric_set exceeds 100 characters")
 		}
 		if len(input.Data) > MaximumRecordBytes {
 			return nil, fmt.Errorf("telemetry data for stream %s exceeds %d bytes", input.Stream, MaximumRecordBytes)
 		}
-		scope := "server"
+		if input.MetricSet != nil && len(*input.MetricSet) > 100 {
+			return nil, errors.New("telemetry metric_set exceeds 100 characters")
+		}
+
+		serverScope := IsServerStream(input.Stream)
+		if serverScope {
+			if input.ApplicationID != nil {
+				return nil, fmt.Errorf("server stream %s must not contain application_id", input.Stream)
+			}
+			if input.Source.Kind != "server" || input.Source.ApplicationID != "" {
+				return nil, fmt.Errorf("server stream %s has an invalid local source scope", input.Stream)
+			}
+		} else {
+			if input.ApplicationID == nil || !uuidPattern.MatchString(*input.ApplicationID) {
+				return nil, fmt.Errorf("application stream %s requires a valid application_id UUID", input.Stream)
+			}
+			if input.Source.Kind != "application" || input.Source.ApplicationID != *input.ApplicationID {
+				return nil, fmt.Errorf("application stream %s source does not match application_id", input.Stream)
+			}
+		}
+		if input.Source.EventID == "" {
+			return nil, errors.New("telemetry source event_id must not be empty")
+		}
+
+		currentScope := "server"
 		if input.ApplicationID != nil {
-			scope = *input.ApplicationID
+			currentScope = *input.ApplicationID
 		}
-		sequenceKey := scope + "|" + input.Stream
-		sequences.Values[sequenceKey]++
-		recordID, err := newUUID()
-		if err != nil {
-			return nil, err
+		if scopeKey == "" {
+			scopeKey = currentScope
+		} else if scopeKey != currentScope {
+			break
 		}
+		if len(batch.Records) >= MaximumBatchRecords {
+			break
+		}
+
+		sequenceKey := currentScope + "|" + input.Stream
+		nextSequence := sequences.Values[sequenceKey] + 1
 		observedAt := input.ObservedAt.UTC()
 		collectedAt := input.CollectedAt.UTC()
 		if observedAt.IsZero() {
@@ -286,37 +448,212 @@ func (s *Sender) buildPending(instanceID string, inputs []InputRecord) (*pending
 		if collectedAt.IsZero() {
 			collectedAt = time.Now().UTC()
 		}
+
+		recordID, err := newUUID()
+		if err != nil {
+			return nil, err
+		}
 		record := Record{
 			RecordID:      recordID,
 			Stream:        input.Stream,
-			Sequence:      sequences.Values[sequenceKey],
+			Sequence:      nextSequence,
 			ObservedAt:    observedAt,
 			CollectedAt:   collectedAt,
 			ApplicationID: input.ApplicationID,
 			MetricSet:     input.MetricSet,
 			Data:          append(json.RawMessage(nil), input.Data...),
 		}
+
+		candidate := batch
+		candidate.Records = append(append([]Record(nil), batch.Records...), record)
 		encodedRecord, err := json.Marshal(record)
 		if err != nil {
 			return nil, fmt.Errorf("encode telemetry record: %w", err)
 		}
 		if len(encodedRecord) > MaximumRecordBytes {
-			return nil, fmt.Errorf("telemetry record for stream %s exceeds %d bytes", input.Stream, MaximumRecordBytes)
+			if len(batch.Records) == 0 {
+				batch.Records = append(batch.Records, record)
+				sources = append(sources, input.Source)
+				sequences.Values[sequenceKey] = nextSequence
+				break
+			}
+			break
 		}
-		batch.Records = append(batch.Records, record)
+
+		encodedBatch, err := json.Marshal(candidate)
+		if err != nil {
+			return nil, fmt.Errorf("encode telemetry batch: %w", err)
+		}
+		if len(encodedBatch) > MaximumBatchBytes {
+			if len(batch.Records) == 0 {
+				batch.Records = append(batch.Records, record)
+				sources = append(sources, input.Source)
+				sequences.Values[sequenceKey] = nextSequence
+			}
+			break
+		}
+
+		batch.Records = candidate.Records
 		sources = append(sources, input.Source)
+		sequences.Values[sequenceKey] = nextSequence
 	}
-	encoded, err := json.Marshal(batch)
-	if err != nil {
-		return nil, err
-	}
-	if len(encoded) > MaximumBatchBytes {
-		return nil, fmt.Errorf("telemetry batch exceeds %d bytes; batch splitting is required", MaximumBatchBytes)
+
+	if len(batch.Records) == 0 {
+		return nil, nil
 	}
 	if err := s.saveSequences(sequences); err != nil {
 		return nil, err
 	}
 	return &pendingBatch{Batch: batch, Sources: sources}, nil
+}
+
+
+func (s *Sender) splitPending(pending pendingBatch) error
+{
+	middle := len(pending.Batch.Records) / 2
+	if middle <= 0 || middle >= len(pending.Batch.Records) {
+		return errors.New("telemetry batch cannot be split")
+	}
+
+	leftID, err := newUUID()
+	if err != nil {
+		return err
+	}
+	rightID, err := newUUID()
+	if err != nil {
+		return err
+	}
+
+	left := pendingBatch{
+		Batch: Batch{
+			ProtocolVersion: pending.Batch.ProtocolVersion,
+			BatchID:         leftID,
+			AgentInstanceID: pending.Batch.AgentInstanceID,
+			SentAt:          time.Now().UTC(),
+			Records:         append([]Record(nil), pending.Batch.Records[:middle]...),
+		},
+		Sources: append([]Source(nil), pending.Sources[:middle]...),
+	}
+	right := pendingBatch{
+		Batch: Batch{
+			ProtocolVersion: pending.Batch.ProtocolVersion,
+			BatchID:         rightID,
+			AgentInstanceID: pending.Batch.AgentInstanceID,
+			SentAt:          time.Now().UTC(),
+			Records:         append([]Record(nil), pending.Batch.Records[middle:]...),
+		},
+		Sources: append([]Source(nil), pending.Sources[middle:]...),
+		Following: append([]pendingBatch(nil), pending.Following...),
+	}
+	left.Following = append([]pendingBatch{right}, pending.Following...)
+	return s.savePending(left)
+}
+
+func (s *Sender) quarantinePending(statusCode int, reason string) error
+{
+	pending, err := s.loadPending()
+	if err != nil {
+		return err
+	}
+	if pending == nil {
+		return nil
+	}
+
+	entry := QuarantineEntry{
+		QuarantinedAt: time.Now().UTC(),
+		StatusCode:    statusCode,
+		Reason:        reason,
+		Pending:       *pending,
+	}
+	content, err := json.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("encode telemetry quarantine entry: %w", err)
+	}
+	content = append(content, '\n')
+
+	path := filepath.Join(s.dir, "quarantine.ndjson")
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return fmt.Errorf("open telemetry quarantine file: %w", err)
+	}
+	if err := file.Chmod(0600); err != nil {
+		file.Close()
+		return fmt.Errorf("secure telemetry quarantine file: %w", err)
+	}
+	if _, err := file.Write(content); err != nil {
+		file.Close()
+		return fmt.Errorf("write telemetry quarantine entry: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		file.Close()
+		return fmt.Errorf("sync telemetry quarantine entry: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close telemetry quarantine file: %w", err)
+	}
+	if err := syncDirectory(s.dir); err != nil {
+		return fmt.Errorf("sync telemetry quarantine directory: %w", err)
+	}
+	return nil
+}
+
+func markQuarantined(sources []Source) []Source
+{
+	result := append([]Source(nil), sources...)
+	for index := range result {
+		result[index].Quarantined = true
+	}
+	return result
+}
+
+func exponentialBackoff(attempt int) time.Duration
+{
+	delay := time.Second * time.Duration(1<<attempt)
+	if delay > 30*time.Second {
+		delay = 30 * time.Second
+	}
+	return time.Duration(float64(delay) * (0.5 + rand.Float64()))
+}
+
+func parseRetryAfter(value string, now time.Time) time.Duration
+{
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil && seconds >= 0 {
+		delay := time.Duration(seconds) * time.Second
+		if delay > 5*time.Minute {
+			return 5 * time.Minute
+		}
+		return delay
+	}
+	if parsed, err := http.ParseTime(value); err == nil {
+		delay := parsed.Sub(now)
+		if delay < 0 {
+			return 0
+		}
+		if delay > 5*time.Minute {
+			return 5 * time.Minute
+		}
+		return delay
+	}
+	return 0
+}
+
+func waitRetry(ctx context.Context, delay time.Duration) error
+{
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (s *Sender) loadPending() (*pendingBatch, error) {
