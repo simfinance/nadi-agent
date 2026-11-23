@@ -46,6 +46,14 @@ Context strings are limited to 2,048 characters. Only scalar string, boolean,
 number, and null context values are accepted. Nested objects and arrays are
 rejected. Unknown top-level fields are rejected. Raw stack traces are rejected.
 
+The Bridge endpoint `GET /_nadi/v1/logs/application` returns a sanitized
+summary, not raw application log messages or stack traces. The Agent maps the
+Bridge's `source` marker (`laravel_application`) to the Central `channel`
+field, derives the required `message` from the returned exception type (or
+uses an explicit unclassified-summary label), and carries the Bridge
+fingerprint and exception type in `context`. The Agent does not reconstruct or
+claim to possess the original raw log message.
+
 The Agent's `internal/logtelemetry` normalizers redact common authorization,
 Bearer, cookie, password, token, API-key, secret, and credential patterns.
 Sensitive context keys are replaced with `[REDACTED]`.
