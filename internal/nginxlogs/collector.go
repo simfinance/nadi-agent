@@ -209,7 +209,7 @@ func (c *Collector) CollectWithCursor(now time.Time) (Snapshot, Cursor, error) {
 			break
 		}
 	}
-	if consumed == 0 && len(content) == c.maxBytes && current.Offset+int64(len(content)) < info.Size() {
+	if consumed == 0 && int64(len(content)) == c.maxBytes && current.Offset+int64(len(content)) < info.Size() {
 		return Snapshot{}, Cursor{}, errors.New("Nginx error log contains a line larger than the configured read window")
 	}
 
