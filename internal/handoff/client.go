@@ -120,6 +120,14 @@ func (c *Client) exchange(request any, expectedApplicationID string) error {
 		return fmt.Errorf("write handoff request: %w", err)
 	}
 
+	unixConnection, ok := connection.(*net.UnixConn)
+	if !ok {
+		return errors.New("handoff transport is not a Unix socket")
+	}
+	if err := unixConnection.CloseWrite(); err != nil {
+		return fmt.Errorf("finish handoff request: %w", err)
+	}
+
 	responseBytes, err := io.ReadAll(io.LimitReader(connection, maximumResponseBytes+1))
 	if err != nil {
 		return fmt.Errorf("read handoff response: %w", err)
