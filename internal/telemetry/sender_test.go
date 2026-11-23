@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -300,7 +300,6 @@ func TestBuildPendingCapsBatchAtFiveHundredWithoutAcknowledgingRemainder(t *test
 		t.Fatalf("expected exactly %d records and sources, got %d and %d", MaximumBatchRecords, len(pending.Batch.Records), len(pending.Sources))
 	}
 }
-
 
 func TestSendQuarantinesPermanentCentralStatuses(t *testing.T) {
 	for _, statusCode := range []int{
