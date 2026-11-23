@@ -206,7 +206,6 @@ func TestNewCollectorRejectsNonCleanOrRelativePaths(t *testing.T) {
 	}
 }
 
-
 func TestParseLineRejectsMessagesOverEightKiB(t *testing.T) {
 	message := strings.Repeat("x", MaximumMessageBytes+1)
 	line := "2026/11/23 08:00:00 [error] 123#123: " + message
