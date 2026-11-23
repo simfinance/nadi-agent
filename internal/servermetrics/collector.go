@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"nadi-agent/internal/nginxlogs"
 	"nadi-agent/internal/nginxmonitor"
 )
 
@@ -30,6 +31,7 @@ type Snapshot struct {
 	Disks         []DiskStats           `json:"disks"`
 	Network       []NetworkStats        `json:"network_interfaces"`
 	Nginx         nginxmonitor.Snapshot `json:"nginx"`
+	NginxErrorLogs []nginxlogs.Entry    `json:"nginx_error_logs,omitempty"`
 	LoadAverage   LoadAverage           `json:"load_average"`
 	UptimeSeconds float64               `json:"uptime_seconds"`
 }
