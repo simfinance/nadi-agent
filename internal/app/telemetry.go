@@ -28,14 +28,11 @@ func (a *App) deliverTelemetry(
 				}
 				return nil
 			}
-			if source.Kind == "application" {
-				decision, found := decisions[source.ApplicationID]
-				if !found || !decision.Enabled || !hasApplicationMonitoringCapability(decision.Capabilities) {
-					if err := a.telemetrySender.DiscardPending(); err != nil {
-						return fmt.Errorf("discard telemetry batch after application Activation Gate closed: %w", err)
-					}
-					return nil
+			if source.Kind == "application" && !applicationTelemetryAllowed(decisions, source.ApplicationID) {
+				if err := a.telemetrySender.DiscardPending(); err != nil {
+					return fmt.Errorf("discard telemetry batch after application Activation Gate closed: %w", err)
 				}
+				return nil
 			}
 		}
 	}
@@ -64,6 +61,10 @@ func (a *App) deliverTelemetry(
 	}
 
 	for _, application := range agentState.Applications {
+		if !applicationTelemetryAllowed(decisions, application.ApplicationID) {
+			continue
+		}
+
 		remaining := telemetry.MaximumBatchRecords - len(inputs)
 		if remaining <= 0 {
 			break
@@ -137,4 +138,13 @@ func (a *App) deliverTelemetry(
 		"record_count", len(acknowledged),
 	)
 	return nil
+}
+
+func applicationTelemetryAllowed(
+	decisions map[string]activation.GateDecision,
+	applicationID string,
+) bool {
+	decision, found := decisions[applicationID]
+
+	return found && decision.Enabled && hasApplicationMonitoringCapability(decision.Capabilities)
 }
