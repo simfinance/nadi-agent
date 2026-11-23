@@ -226,9 +226,7 @@ func (a *App) runControlPoll(ctx context.Context, store *state.Store, agentState
 					a.collectServerMetrics(latestState)
 				} else {
 					a.serverMetrics.Reset()
-					if err := a.telemetrySpool.Clear(); err != nil {
-						a.logger.Error("Unable to clear telemetry spool while Runtime Activation Gate is closed", "error", err)
-					}
+					a.logger.Debug("Server collection remains stopped while Runtime Activation Gate is closed; durable spool is retained")
 				}
 				if err := a.deliverTelemetry(ctx, latestState, serverMetricsAllowed, gateDecisions); err != nil {
 					if errors.Is(err, ErrControlPollRequired) {
