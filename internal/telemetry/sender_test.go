@@ -526,7 +526,6 @@ func TestBuildPendingRespectsOneMiBBatchLimit(t *testing.T) {
 	}
 }
 
-
 func TestSendRetries429AndHonorsRetryAfter(t *testing.T) {
 	requestCount := 0
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
