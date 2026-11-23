@@ -20,6 +20,7 @@ type Config struct {
 	StateDir                string
 	ActivationPublicKeyPath string
 	ActivationKeyID         string
+	LogTelemetryEnabled     bool
 }
 
 func Load() (Config, error) {
@@ -33,6 +34,15 @@ func Load() (Config, error) {
 		StateDir:                envOrDefault("NADI_STATE_DIR", "/var/lib/nadi-agent"),
 		ActivationPublicKeyPath: envOrDefault("NADI_ACTIVATION_PUBLIC_KEY", "/etc/nadi-agent/keys/activation-public.pem"),
 		ActivationKeyID:         envOrDefault("NADI_ACTIVATION_KEY_ID", "nadi-central-2026-01"),
+		LogTelemetryEnabled:     false,
+	}
+
+	if value := strings.TrimSpace(os.Getenv("NADI_AGENT_LOG_TELEMETRY_ENABLED")); value != "" {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return Config{}, errors.New("NADI_AGENT_LOG_TELEMETRY_ENABLED must be true or false")
+		}
+		cfg.LogTelemetryEnabled = enabled
 	}
 
 	if value := strings.TrimSpace(os.Getenv("NADI_POLL_INTERVAL_SECONDS")); value != "" {
