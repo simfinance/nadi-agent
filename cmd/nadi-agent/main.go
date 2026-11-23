@@ -21,6 +21,7 @@ func main() {
 	enroll := flag.Bool("enroll", false, "Enroll this Agent with NADI Central")
 	manifestPath := flag.String("manifest", "", "Path to the Enrollment application manifest JSON")
 	enrollmentTokenStdin := flag.Bool("enrollment-token-stdin", false, "Read the one-time Enrollment token from stdin")
+	enrollmentSummaryStdout := flag.Bool("enrollment-summary-stdout", false, "Write non-secret enrollment identity metadata to stdout after enrollment")
 	rotateCredential := flag.Bool("rotate-credential", false, "Retrieve and acknowledge a pending Agent credential rotation")
 	deliveryID := flag.String("delivery-id", "", "Central credential delivery ID to retrieve")
 	flag.Parse()
@@ -36,7 +37,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if *rotateCredential && (*enroll || *manifestPath != "" || *enrollmentTokenStdin) {
+	if *rotateCredential && (*enroll || *manifestPath != "" || *enrollmentTokenStdin || *enrollmentSummaryStdout) {
 		fmt.Fprintln(os.Stderr, "--rotate-credential cannot be combined with Enrollment options")
 		os.Exit(2)
 	}
@@ -56,6 +57,11 @@ func main() {
 		os.Exit(2)
 	}
 
+	if *enrollmentSummaryStdout && !*enroll {
+		fmt.Fprintln(os.Stderr, "--enrollment-summary-stdout requires --enroll")
+		os.Exit(2)
+	}
+
 	if *enrollmentTokenStdin && strings.TrimSpace(cfg.EnrollmentToken) != "" {
 		fmt.Fprintln(os.Stderr, "do not combine --enrollment-token-stdin with NADI_ENROLLMENT_TOKEN")
 		os.Exit(2)
@@ -64,7 +70,7 @@ func main() {
 	if *enrollmentTokenStdin {
 		token, readErr := readEnrollmentToken(os.Stdin)
 		if readErr != nil {
-			fmt.Fprintf(os.Stderr, "unable to read Enrollment token from stdin: %v\\n", readErr)
+			fmt.Fprintf(os.Stderr, "unable to read Enrollment token from stdin: %v\n", readErr)
 			os.Exit(1)
 		}
 
@@ -95,6 +101,14 @@ func main() {
 			logger.Error("NADI Agent Enrollment failed", "error", err)
 			os.Exit(1)
 		}
+
+		if *enrollmentSummaryStdout {
+			if err := application.WriteEnrollmentSummary(os.Stdout); err != nil {
+				logger.Error("Unable to produce non-secret NADI Agent enrollment summary", "error", err)
+				os.Exit(1)
+			}
+		}
+
 		return
 	}
 
