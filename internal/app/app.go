@@ -347,7 +347,7 @@ collectionLoop:
 		}
 
 		workers.Add(1)
-		go func(application state.EnrolledApplication, decision activation.GateDecision) {
+		go func(application state.EnrolledApplication, decision activation.GateDecision, capabilities []string) {
 			defer workers.Done()
 			defer func() {
 				<-semaphore
@@ -384,7 +384,7 @@ collectionLoop:
 				"queue_status", snapshot.Queue.Status,
 				"scheduler_status", snapshot.Scheduler.Status,
 			)
-		}(application, decision)
+		}(application, decision, capabilities)
 	}
 
 	workers.Wait()
