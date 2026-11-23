@@ -311,24 +311,23 @@ collectionLoop:
 	for _, application := range agentState.Applications {
 		decision, found := decisions[application.ApplicationID]
 		if !found || !decision.Enabled {
-			if err := a.applicationSpool.Clear(application.ApplicationID); err != nil {
-				a.logger.Error("Unable to clear application spool while Activation Gate is closed", "application_id", application.ApplicationID, "error", err)
-			}
+			a.logger.Debug(
+				"Application collection remains stopped while Activation Gate is closed; durable spool is retained",
+				"application_id", application.ApplicationID,
+			)
 			continue
 		}
 
 		if !hasApplicationMonitoringCapability(decision.Capabilities) {
-			if err := a.applicationSpool.Clear(application.ApplicationID); err != nil {
-				a.logger.Error("Unable to clear application spool without an application monitoring capability", "application_id", application.ApplicationID, "error", err)
-			}
+			a.logger.Debug(
+				"Application collection skipped because no supported monitoring capability is granted; durable spool is retained",
+				"application_id", application.ApplicationID,
+			)
 			continue
 		}
 
 		if !hasCapability(decision.Capabilities, appmonitor.CapabilityApplicationMetrics) &&
 			!hasCapability(decision.Capabilities, appmonitor.CapabilityDatabaseMonitoring) {
-			if err := a.applicationSpool.Clear(application.ApplicationID); err != nil {
-				a.logger.Error("Unable to clear application spool because no supported Bridge telemetry capability is available", "application_id", application.ApplicationID, "error", err)
-			}
 			a.logger.Info(
 				"Application collection skipped because the granted Bridge telemetry capabilities are unsupported",
 				"application_id", application.ApplicationID,
