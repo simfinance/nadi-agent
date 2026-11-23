@@ -26,15 +26,15 @@ func (a *App) deliverTelemetry(
 	}
 	if hasPending {
 		for _, source := range pendingSources {
-			if source.Kind == "server" && !serverMetricsAllowed {
+			if source.Kind == "server" && !serverStreamAllowed(decisions, source.Stream) {
 				if err := a.telemetrySender.DiscardPending(); err != nil {
-					return fmt.Errorf("discard telemetry batch after server Activation Gate closed: %w", err)
+					return fmt.Errorf("quarantine pending server telemetry after capability gate closed: %w", err)
 				}
 				return nil
 			}
-			if source.Kind == "application" && !applicationTelemetryAllowed(decisions, source.ApplicationID) {
+			if source.Kind == "application" && !applicationStreamAllowed(decisions, source.ApplicationID, source.Stream) {
 				if err := a.telemetrySender.DiscardPending(); err != nil {
-					return fmt.Errorf("discard telemetry batch after application Activation Gate closed: %w", err)
+					return fmt.Errorf("quarantine pending application telemetry after capability gate closed: %w", err)
 				}
 				return nil
 			}
@@ -192,4 +192,36 @@ func applicationTelemetryAllowed(
 	decision, found := decisions[applicationID]
 
 	return found && decision.Enabled && hasApplicationMonitoringCapability(decision.Capabilities)
+}
+
+
+func serverStreamAllowed(
+	decisions map[string]activation.GateDecision,
+	stream string,
+) bool {
+	requiredCapability, found := telemetry.RequiredCapability(stream)
+	if !found || !telemetry.IsServerStream(stream) {
+		return false
+	}
+
+	for _, decision := range decisions {
+		if decision.Enabled && hasCapability(decision.Capabilities, requiredCapability) {
+			return true
+		}
+	}
+	return false
+}
+
+func applicationStreamAllowed(
+	decisions map[string]activation.GateDecision,
+	applicationID string,
+	stream string,
+) bool {
+	requiredCapability, found := telemetry.RequiredCapability(stream)
+	if !found || telemetry.IsServerStream(stream) {
+		return false
+	}
+
+	decision, found := decisions[applicationID]
+	return found && decision.Enabled && hasCapability(decision.Capabilities, requiredCapability)
 }
