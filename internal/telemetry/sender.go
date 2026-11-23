@@ -288,7 +288,7 @@ func (s *Sender) Send(ctx context.Context, agentID string, instanceID string, cr
 				if err := s.quarantinePending(response.StatusCode, "single telemetry record exceeds Central payload limits"); err != nil {
 					return nil, fmt.Errorf("quarantine oversized telemetry record: %w", err)
 				}
-				return markQuarantined(pending.Sources), nil
+				return markQuarantined(pending.Sources, response.StatusCode), nil
 			}
 			if err := s.splitPending(*pending); err != nil {
 				return nil, fmt.Errorf("persist split telemetry batches after HTTP 413: %w", err)
