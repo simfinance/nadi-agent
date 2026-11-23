@@ -27,8 +27,8 @@ var (
 	ipv4Pattern   = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
 	ipv6Pattern   = regexp.MustCompile(`(?i)\b[0-9a-f]{1,4}(?::[0-9a-f]{0,4}){2,}\b|::[0-9a-f]{1,4}(?::[0-9a-f]{0,4})*`)
 	quotedPattern = regexp.MustCompile(`"[^"]*"`)
-secretPattern = regexp.MustCompile(`(?i)(token|access[_-]?token|refresh[_-]?token|password|passwd|secret|client[_-]?secret|authorization|proxy-authorization|api[_-]?key|private[_-]?key)\s*[:=]\s*(?:bearer\s+)?[^\s,;]+`)
-cookiePattern  = regexp.MustCompile(`(?i)(cookie|set-cookie)\s*[:=]\s*[^,]+`)
+	secretPattern = regexp.MustCompile(`(?i)(token|access[_-]?token|refresh[_-]?token|password|passwd|secret|client[_-]?secret|authorization|proxy-authorization|api[_-]?key|private[_-]?key)\s*[:=]\s*(?:bearer\s+)?[^\s,;]+`)
+	cookiePattern  = regexp.MustCompile(`(?i)(cookie|set-cookie)\s*[:=]\s*[^,]+`)
 )
 
 type Status string
