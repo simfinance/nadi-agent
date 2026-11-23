@@ -23,7 +23,7 @@ func TestCollectorDisabledWithoutConfiguredPath(t *testing.T) {
 	}
 }
 
-func TestCollectorReturnsOnlyRedactedErrorMetadata(t *testing.T) {
+func TestCollectorEmitsCentralV11NginxErrorLogSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "error.log")
 	content := strings.Join([]string{
 		`2026/11/23 08:00:00 [error] 123#123: *1 connect() failed, client: 192.0.2.10, request: "GET /?token=topsecret HTTP/1.1", host: "example.org"`,
@@ -43,12 +43,26 @@ func TestCollectorReturnsOnlyRedactedErrorMetadata(t *testing.T) {
 	if snapshot.Status != StatusAvailable {
 		t.Fatalf("expected available status, got %s (%s)", snapshot.Status, snapshot.ErrorCode)
 	}
-	if len(snapshot.Entries) != 2 {
-		t.Fatalf("expected two error entries, got %d", len(snapshot.Entries))
+	if len(snapshot.Entries) != 3 {
+		t.Fatalf("expected three supported severity entries, got %d", len(snapshot.Entries))
 	}
-	for _, entry := range snapshot.Entries {
-		if entry.Fingerprint == "" || len(entry.Fingerprint) != 64 {
-			t.Fatalf("expected SHA-256 fingerprint, got %q", entry.Fingerprint)
+
+	expectedSeverities := []string{"error", "warning", "critical"}
+	for index, entry := range snapshot.Entries {
+		if entry.Timestamp.IsZero() || entry.Message == "" || entry.Source != "nginx" {
+			t.Fatalf("entry %d does not match the Central log schema: %#v", index, entry)
+		}
+		if entry.Severity != expectedSeverities[index] {
+			t.Fatalf("entry %d severity = %q, want %q", index, entry.Severity, expectedSeverities[index])
+		}
+		if strings.Contains(entry.Message, "topsecret") ||
+			strings.Contains(entry.Message, "hunter2") ||
+			strings.Contains(entry.Message, "192.0.2.10") ||
+			strings.Contains(entry.Message, "example.org") {
+			t.Fatalf("entry %d retained sensitive input: %q", index, entry.Message)
+		}
+		if len([]byte(entry.Message)) > MaximumMessageBytes {
+			t.Fatalf("entry %d exceeds the message byte limit", index)
 		}
 	}
 }
@@ -133,7 +147,7 @@ func TestCollectorEnforcesTailByteLimit(t *testing.T) {
 	}
 }
 
-func TestFingerprintRedactsIPv6AddressesButPreservesHexWords(t *testing.T) {
+func TestParseLineRedactsIPv6AddressesAndPreservesMessageWords(t *testing.T) {
 	first, ok := parseLine("2026/11/23 08:00:00 [error] 123#123: client 2001:db8::1 returned bad gateway")
 	if !ok {
 		t.Fatal("expected first Nginx error line to parse")
@@ -144,8 +158,8 @@ func TestFingerprintRedactsIPv6AddressesButPreservesHexWords(t *testing.T) {
 		t.Fatal("expected second Nginx error line to parse")
 	}
 
-	if first.Fingerprint != second.Fingerprint {
-		t.Fatal("expected IPv6 address changes to be removed from the fingerprint")
+	if first.Message != second.Message {
+		t.Fatal("expected IPv6 addresses to be redacted from the emitted message")
 	}
 
 	third, ok := parseLine("2026/11/23 08:00:00 [error] 123#123: client 2001:db8::2 returned error gateway")
@@ -153,12 +167,12 @@ func TestFingerprintRedactsIPv6AddressesButPreservesHexWords(t *testing.T) {
 		t.Fatal("expected third Nginx error line to parse")
 	}
 
-	if second.Fingerprint == third.Fingerprint {
-		t.Fatal("expected ordinary message words to remain part of the fingerprint")
+	if second.Message == third.Message {
+		t.Fatal("expected ordinary message words to remain in the emitted message")
 	}
 }
 
-func TestFingerprintRedactsQuotedRequestsCredentialsAndCookies(t *testing.T) {
+func TestParseLineRedactsQuotedRequestsCredentialsAndCookies(t *testing.T) {
 	first, ok := parseLine("2026/11/23 08:00:00 [error] 123#123: request: \"GET /?token=first HTTP/1.1\", Authorization: Bearer secret-one, Cookie: session=alpha; csrf=one")
 	if !ok {
 		t.Fatal("expected first Nginx error line to parse")
@@ -169,8 +183,13 @@ func TestFingerprintRedactsQuotedRequestsCredentialsAndCookies(t *testing.T) {
 		t.Fatal("expected second Nginx error line to parse")
 	}
 
-	if first.Fingerprint != second.Fingerprint {
-		t.Fatal("expected request details, credentials, and cookies to be removed from fingerprints")
+	if first.Message != second.Message {
+		t.Fatal("expected request details, credentials, and cookies to be redacted")
+	}
+	for _, secret := range []string{"secret-one", "secret-two", "session=alpha", "session=beta", "token=first", "token=second"} {
+		if strings.Contains(first.Message, secret) || strings.Contains(second.Message, secret) {
+			t.Fatalf("sensitive value %q was retained", secret)
+		}
 	}
 }
 
@@ -183,6 +202,39 @@ func TestNewCollectorRejectsNonCleanOrRelativePaths(t *testing.T) {
 	for _, path := range paths {
 		if _, err := NewCollector(path, DefaultMaximumBytes, DefaultMaximumEntries); err == nil {
 			t.Fatalf("expected path %q to be rejected", path)
+		}
+	}
+}
+
+
+func TestParseLineRejectsMessagesOverEightKiB(t *testing.T) {
+	message := strings.Repeat("x", MaximumMessageBytes+1)
+	line := "2026/11/23 08:00:00 [error] 123#123: " + message
+	if _, ok := parseLine(line); ok {
+		t.Fatal("expected oversized log message to be rejected")
+	}
+}
+
+func TestParseLineMapsAllCentralSeverityNames(t *testing.T) {
+	tests := map[string]string{
+		"emerg":  "emergency",
+		"alert":  "alert",
+		"crit":   "critical",
+		"error":  "error",
+		"warn":   "warning",
+		"notice": "notice",
+		"info":   "info",
+		"debug":  "debug",
+	}
+
+	for input, expected := range tests {
+		line := "2026/11/23 08:00:00 [" + input + "] 123#123: message"
+		entry, ok := parseLine(line)
+		if !ok {
+			t.Fatalf("expected severity %q to parse", input)
+		}
+		if entry.Severity != expected {
+			t.Fatalf("severity %q mapped to %q, want %q", input, entry.Severity, expected)
 		}
 	}
 }
