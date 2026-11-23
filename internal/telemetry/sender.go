@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
+	mathrand "math/rand"
 	"net/http"
 	"net/url"
 	"os"
@@ -39,7 +39,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
+	mathrand "math/rand"
 	"net/http"
 	"net/url"
 	"os"
@@ -60,25 +60,25 @@ const (
 )
 
 	streamCapabilities = map[string]string{
-		"server_metrics":        "server_metrics",
-		"nginx_metrics":         "server_metrics",
-		"nginx_vhost_metrics":   "server_metrics",
-		"nginx_error_logs":      "system_logs",
-		"application_metrics":   "application_metrics",
-		"application_logs":      "application_logs",
-		"database_metrics":      "database_monitoring",
-		"database_connections":  "database_monitoring",
-		"queue_metrics":         "queue_monitoring",
-		"queue_jobs":             "queue_monitoring",
-		"scheduler_metrics":     "scheduler_monitoring",
-		"scheduler_events":      "scheduler_monitoring",
+		"server_metrics":       "server_metrics",
+		"nginx_metrics":        "server_metrics",
+		"nginx_vhost_metrics":  "server_metrics",
+		"nginx_error_logs":     "system_logs",
+		"application_metrics":  "application_metrics",
+		"application_logs":     "application_logs",
+		"database_metrics":     "database_monitoring",
+		"database_connections": "database_monitoring",
+		"queue_metrics":        "queue_monitoring",
+		"queue_jobs":            "queue_monitoring",
+		"scheduler_metrics":    "scheduler_monitoring",
+		"scheduler_events":     "scheduler_monitoring",
 	}
 
 	serverStreams = map[string]struct{}{
-		"server_metrics":      {},
-		"nginx_metrics":       {},
-		"nginx_vhost_metrics": {},
-		"nginx_error_logs":    {},
+		"server_metrics":       {},
+		"nginx_metrics":        {},
+		"nginx_vhost_metrics":  {},
+		"nginx_error_logs":     {},
 	}
 )
 
@@ -125,9 +125,9 @@ type pendingBatch struct {
 }
 
 type QuarantineEntry struct {
-	QuarantinedAt time.Time   `json:"quarantined_at"`
-	StatusCode    int         `json:"status_code"`
-	Reason        string      `json:"reason"`
+	QuarantinedAt time.Time    `json:"quarantined_at"`
+	StatusCode    int          `json:"status_code"`
+	Reason        string       `json:"reason"`
 	Pending       pendingBatch `json:"pending"`
 }
 
@@ -136,8 +136,7 @@ type HTTPStatusError struct {
 	Message    string
 }
 
-func (e *HTTPStatusError) Error() string
-{
+func (e *HTTPStatusError) Error() string {
 	return fmt.Sprintf("Central telemetry endpoint returned HTTP %d: %s", e.StatusCode, e.Message)
 }
 
@@ -192,14 +191,12 @@ func NewSender(baseURL string, directory string, timeout time.Duration) (*Sender
 	}, nil
 }
 
-func RequiredCapability(stream string) (string, bool)
-{
+func RequiredCapability(stream string) (string, bool) {
 	capability, found := streamCapabilities[stream]
 	return capability, found
 }
 
-func IsServerStream(stream string) bool
-{
+func IsServerStream(stream string) bool {
 	_, found := serverStreams[stream]
 	return found
 }
@@ -224,8 +221,24 @@ func (s *Sender) Send(ctx context.Context, agentID string, instanceID string, cr
 		if err != nil {
 			return nil, err
 		}
+		if pending == nil {
+			return nil, nil
+		}
 		if err := s.savePending(*pending); err != nil {
 			return nil, err
+		}
+	}
+
+	for index, record := range pending.Batch.Records {
+		encodedRecord, err := json.Marshal(record)
+		if err != nil {
+			return nil, fmt.Errorf("encode pending telemetry record: %w", err)
+		}
+		if len(encodedRecord) > MaximumRecordBytes {
+			if err := s.quarantinePending(http.StatusRequestEntityTooLarge, "single telemetry record exceeds 64 KiB"); err != nil {
+				return nil, fmt.Errorf("quarantine oversized telemetry record: %w", err)
+			}
+			return markQuarantined(pending.Sources[:index+1]), nil
 		}
 	}
 
@@ -234,7 +247,16 @@ func (s *Sender) Send(ctx context.Context, agentID string, instanceID string, cr
 		return nil, fmt.Errorf("encode pending telemetry batch: %w", err)
 	}
 	if len(body) > MaximumBatchBytes {
-		return nil, fmt.Errorf("pending telemetry batch exceeds %d bytes", MaximumBatchBytes)
+		if len(pending.Batch.Records) == 1 {
+			if err := s.quarantinePending(http.StatusRequestEntityTooLarge, "single telemetry record exceeds 1 MiB"); err != nil {
+				return nil, fmt.Errorf("quarantine oversized telemetry record: %w", err)
+			}
+			return markQuarantined(pending.Sources), nil
+		}
+		if err := s.splitPending(*pending); err != nil {
+			return nil, fmt.Errorf("persist split telemetry batches: %w", err)
+		}
+		return nil, nil
 	}
 
 	for attempt := 0; attempt < 4; attempt++ {
@@ -287,8 +309,7 @@ func (s *Sender) Send(ctx context.Context, agentID string, instanceID string, cr
 			if err := s.quarantinePending(response.StatusCode, string(responseBody)); err != nil {
 				return nil, fmt.Errorf("quarantine permanent Central telemetry rejection: %w", err)
 			}
-			sources := markQuarantined(pending.Sources)
-			return sources, nil
+			return markQuarantined(pending.Sources), nil
 
 		case http.StatusRequestEntityTooLarge:
 			if len(pending.Batch.Records) == 1 {
@@ -328,7 +349,7 @@ func (s *Sender) Send(ctx context.Context, agentID string, instanceID string, cr
 	}
 
 	return nil, errors.New("telemetry delivery ended without a result")
-
+}
 func (s *Sender) Complete() error {
 	pending, err := s.loadPending()
 	if err != nil {
@@ -389,17 +410,11 @@ func (s *Sender) buildPending(instanceID string, inputs []InputRecord) (*pending
 	scopeKey := ""
 
 	for _, input := range inputs {
-		capability, supported := RequiredCapability(input.Stream)
-		if !supported {
+		if _, supported := RequiredCapability(input.Stream); !supported {
 			return nil, fmt.Errorf("unsupported Central telemetry stream %q", input.Stream)
 		}
-		_ = capability
-
 		if len(input.Data) == 0 || !json.Valid(input.Data) {
 			return nil, errors.New("telemetry input contains invalid data JSON")
-		}
-		if len(input.Data) > MaximumRecordBytes {
-			return nil, fmt.Errorf("telemetry data for stream %s exceeds %d bytes", input.Stream, MaximumRecordBytes)
 		}
 		if input.MetricSet != nil && len(*input.MetricSet) > 100 {
 			return nil, errors.New("telemetry metric_set exceeds 100 characters")
@@ -466,36 +481,21 @@ func (s *Sender) buildPending(instanceID string, inputs []InputRecord) (*pending
 
 		candidate := batch
 		candidate.Records = append(append([]Record(nil), batch.Records...), record)
-		encodedRecord, err := json.Marshal(record)
-		if err != nil {
-			return nil, fmt.Errorf("encode telemetry record: %w", err)
-		}
-		if len(encodedRecord) > MaximumRecordBytes {
-			if len(batch.Records) == 0 {
-				batch.Records = append(batch.Records, record)
-				sources = append(sources, input.Source)
-				sequences.Values[sequenceKey] = nextSequence
-				break
-			}
-			break
-		}
-
 		encodedBatch, err := json.Marshal(candidate)
 		if err != nil {
 			return nil, fmt.Errorf("encode telemetry batch: %w", err)
 		}
-		if len(encodedBatch) > MaximumBatchBytes {
-			if len(batch.Records) == 0 {
-				batch.Records = append(batch.Records, record)
-				sources = append(sources, input.Source)
-				sequences.Values[sequenceKey] = nextSequence
-			}
+		if len(encodedBatch) > MaximumBatchBytes && len(batch.Records) > 0 {
 			break
 		}
 
 		batch.Records = candidate.Records
 		sources = append(sources, input.Source)
 		sequences.Values[sequenceKey] = nextSequence
+
+		if len(encodedBatch) > MaximumBatchBytes {
+			break
+		}
 	}
 
 	if len(batch.Records) == 0 {
@@ -508,8 +508,7 @@ func (s *Sender) buildPending(instanceID string, inputs []InputRecord) (*pending
 }
 
 
-func (s *Sender) splitPending(pending pendingBatch) error
-{
+func (s *Sender) splitPending(pending pendingBatch) error {
 	middle := len(pending.Batch.Records) / 2
 	if middle <= 0 || middle >= len(pending.Batch.Records) {
 		return errors.New("telemetry batch cannot be split")
@@ -549,8 +548,7 @@ func (s *Sender) splitPending(pending pendingBatch) error
 	return s.savePending(left)
 }
 
-func (s *Sender) quarantinePending(statusCode int, reason string) error
-{
+func (s *Sender) quarantinePending(statusCode int, reason string) error {
 	pending, err := s.loadPending()
 	if err != nil {
 		return err
@@ -597,8 +595,7 @@ func (s *Sender) quarantinePending(statusCode int, reason string) error
 	return nil
 }
 
-func markQuarantined(sources []Source) []Source
-{
+func markQuarantined(sources []Source) []Source {
 	result := append([]Source(nil), sources...)
 	for index := range result {
 		result[index].Quarantined = true
@@ -606,17 +603,15 @@ func markQuarantined(sources []Source) []Source
 	return result
 }
 
-func exponentialBackoff(attempt int) time.Duration
-{
+func exponentialBackoff(attempt int) time.Duration {
 	delay := time.Second * time.Duration(1<<attempt)
 	if delay > 30*time.Second {
 		delay = 30 * time.Second
 	}
-	return time.Duration(float64(delay) * (0.5 + rand.Float64()))
+	return time.Duration(float64(delay) * (0.5 + mathrand.Float64()))
 }
 
-func parseRetryAfter(value string, now time.Time) time.Duration
-{
+func parseRetryAfter(value string, now time.Time) time.Duration {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return 0
@@ -641,8 +636,7 @@ func parseRetryAfter(value string, now time.Time) time.Duration
 	return 0
 }
 
-func waitRetry(ctx context.Context, delay time.Duration) error
-{
+func waitRetry(ctx context.Context, delay time.Duration) error {
 	if delay <= 0 {
 		return nil
 	}
