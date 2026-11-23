@@ -223,7 +223,7 @@ func (s *Sender) Send(ctx context.Context, agentID string, instanceID string, cr
 			if err := s.quarantinePending(http.StatusRequestEntityTooLarge, "single telemetry record exceeds 1 MiB"); err != nil {
 				return nil, fmt.Errorf("quarantine oversized telemetry record: %w", err)
 			}
-			return markQuarantined(pending.Sources, response.StatusCode), nil
+			return markQuarantined(pending.Sources, http.StatusRequestEntityTooLarge), nil
 		}
 		if err := s.splitPending(*pending); err != nil {
 			return nil, fmt.Errorf("persist split telemetry batches: %w", err)
@@ -281,7 +281,7 @@ func (s *Sender) Send(ctx context.Context, agentID string, instanceID string, cr
 			if err := s.quarantinePending(response.StatusCode, string(responseBody)); err != nil {
 				return nil, fmt.Errorf("quarantine permanent Central telemetry rejection: %w", err)
 			}
-			return markQuarantined(pending.Sources), nil
+			return markQuarantined(pending.Sources, response.StatusCode), nil
 
 		case http.StatusRequestEntityTooLarge:
 			if len(pending.Batch.Records) == 1 {
