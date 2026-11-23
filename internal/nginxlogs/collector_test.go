@@ -339,3 +339,27 @@ func TestDurableCollectorFailsClosedWhenFileRotatesWithUnreadBytes(t *testing.T)
 		t.Fatal("expected rotation with unread bytes to fail closed")
 	}
 }
+
+
+func TestDurableCollectorDoesNotAdvancePastInvalidOversizedEntry(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "error.log")
+	statePath := filepath.Join(directory, "cursor.json")
+	line := "2026/11/23 08:00:00 [error] 123#123: " + strings.Repeat("x", MaximumMessageBytes+1) + "\n"
+	if err := os.WriteFile(path, []byte(line), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	collector, err := NewDurableCollector(path, statePath, DefaultMaximumBytes, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := collector.CollectWithCursor(time.Now().UTC()); err == nil {
+		t.Fatal("expected oversized recognized log entry to fail closed")
+	}
+	if _, exists, err := collector.loadCursor(); err != nil {
+		t.Fatal(err)
+	} else if exists {
+		t.Fatal("invalid log entry must not advance or create the durable cursor")
+	}
+}
