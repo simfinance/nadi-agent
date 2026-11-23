@@ -16,6 +16,7 @@ import (
 	"nadi-agent/internal/config"
 	"nadi-agent/internal/control"
 	"nadi-agent/internal/identity"
+	"nadi-agent/internal/logdedupe"
 	"nadi-agent/internal/servermetrics"
 	"nadi-agent/internal/spool"
 	"nadi-agent/internal/state"
@@ -31,6 +32,7 @@ type App struct {
 	telemetrySpool     *spool.Store
 	applicationSpool   *appspool.Store
 	telemetrySender    *telemetry.Sender
+	logDedupe          *logdedupe.Store
 }
 
 func New(cfg config.Config, logger *slog.Logger) *App {
@@ -65,6 +67,12 @@ func (a *App) Run(ctx context.Context) error {
 		return fmt.Errorf("initialize per-application telemetry spool: %w", err)
 	}
 	a.applicationSpool = applicationSpool
+
+	logDedupe, err := logdedupe.Open(filepath.Join(a.config.StateDir, "log-dedupe"))
+	if err != nil {
+		return fmt.Errorf("initialize durable log fingerprint state: %w", err)
+	}
+	a.logDedupe = logDedupe
 
 	telemetrySender, err := telemetry.NewSender(
 		a.config.CentralURL,
