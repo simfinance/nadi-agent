@@ -51,7 +51,8 @@ type EnrolledApplication struct {
 	ActivationStatus      string `json:"activation_status"`
 	MonitoringStatus      string `json:"monitoring_status"`
 	Endpoint              string `json:"endpoint"`
-	ApplicationCredential string `json:"application_credential"`
+	ApplicationCredential      string `json:"application_credential"`
+	BridgeCredentialPublished bool   `json:"bridge_credential_published,omitempty"`
 }
 
 type CredentialRotation struct {
