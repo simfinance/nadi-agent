@@ -102,6 +102,13 @@ func inactiveActivationState(application control.Application, gateEnabled bool) 
 		return "revoked"
 	}
 
+	switch application.MonitoringStatus {
+	case "suspended":
+		return "suspended"
+	case "revoked":
+		return "revoked"
+	}
+
 	if application.RegistrationStatus == "pending" {
 		return "pending_approval"
 	}
