@@ -32,3 +32,36 @@ func TestValidateAcceptsHTTPSCentralURL(t *testing.T) {
 		t.Fatalf("expected valid configuration, got: %v", err)
 	}
 }
+
+
+func TestLoadDisablesLogTelemetryByDefault(t *testing.T) {
+	t.Setenv("NADI_AGENT_LOG_TELEMETRY_ENABLED", "")
+	t.Setenv("NADI_CENTRAL_URL", "https://central.example.test")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load default config: %v", err)
+	}
+	if cfg.LogTelemetryEnabled {
+		t.Fatal("Agent log telemetry must be disabled by default")
+	}
+}
+
+func TestLoadEnablesLogTelemetryOnlyWithExplicitOptIn(t *testing.T) {
+	t.Setenv("NADI_AGENT_LOG_TELEMETRY_ENABLED", "true")
+	t.Setenv("NADI_CENTRAL_URL", "https://central.example.test")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load opt-in config: %v", err)
+	}
+	if !cfg.LogTelemetryEnabled {
+		t.Fatal("expected explicit Agent log telemetry opt-in to be honored")
+	}
+}
+
+func TestLoadRejectsInvalidLogTelemetrySetting(t *testing.T) {
+	t.Setenv("NADI_AGENT_LOG_TELEMETRY_ENABLED", "sometimes")
+	t.Setenv("NADI_CENTRAL_URL", "https://central.example.test")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected invalid log telemetry setting to be rejected")
+	}
+}
