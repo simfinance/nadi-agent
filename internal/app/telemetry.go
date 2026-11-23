@@ -48,6 +48,7 @@ func (a *App) deliverTelemetry(
 	}
 
 	inputs := make([]telemetry.InputRecord, 0, 500)
+	emptyApplicationEvents := make(map[string][]string)
 
 	if serverMetricsAllowed {
 		serverRecords, err := a.telemetrySpool.ReadBatch(telemetry.MaximumBatchRecords)
