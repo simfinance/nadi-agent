@@ -15,14 +15,28 @@ func (a *App) collectNginxErrorLogs(agentState state.State) {
 		return
 	}
 
-	snapshot := a.nginxErrorLogs.Collect(time.Now().UTC())
-	if snapshot.Status != nginxlogs.StatusAvailable || len(snapshot.Entries) == 0 {
+	snapshot, cursor, err := a.nginxErrorLogs.CollectWithCursor(time.Now().UTC())
+	if err != nil {
+		a.logger.Warn(
+			"Nginx error log cursor collection failed; cursor was not advanced",
+			"server_id", agentState.CentralServerID,
+			"error", err,
+		)
+		return
+	}
+	if snapshot.Status != nginxlogs.StatusAvailable {
 		if snapshot.Status == nginxlogs.StatusUnavailable {
 			a.logger.Warn(
 				"Nginx error log collection is unavailable",
 				"server_id", agentState.CentralServerID,
 				"error_code", snapshot.ErrorCode,
 			)
+		}
+		return
+	}
+	if len(snapshot.Entries) == 0 {
+		if err := a.nginxErrorLogs.Commit(cursor); err != nil {
+			a.logger.Error("Nginx error log cursor could not be persisted", "error", err)
 		}
 		return
 	}
@@ -73,6 +87,14 @@ func (a *App) collectNginxErrorLogs(agentState state.State) {
 			"event_id", record.EventID,
 			"error", err,
 		)
+	}
+	if err := a.nginxErrorLogs.Commit(cursor); err != nil {
+		a.logger.Error(
+			"Nginx error log cursor could not be persisted after the durable spool append; duplicate entries may be collected again",
+			"event_id", record.EventID,
+			"error", err,
+		)
+		return
 	}
 
 	a.logger.Info(
