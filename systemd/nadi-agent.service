@@ -13,6 +13,7 @@ Environment=NADI_CENTRAL_URL=https://nadi.pesantrenalirsyad.org
 Environment=NADI_STATE_DIR=/var/lib/nadi-agent
 Environment=NADI_ACTIVATION_PUBLIC_KEY=/etc/nadi-agent/keys/activation-public.pem
 Environment=NADI_ACTIVATION_KEY_ID=nadi-central-2026-01
+Environment=NADI_AGENT_HANDOFF_SOCKET=/run/nadi-agent/credential-handoff.sock
 ExecStart=/opt/nadi/bin/nadi-agent
 Restart=on-failure
 RestartSec=10s
