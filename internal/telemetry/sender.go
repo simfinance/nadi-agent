@@ -26,34 +26,7 @@ const (
 )
 
 var (
-	uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}package telemetry
-
-import (
-	"bytes"
-	"context"
-	"crypto/rand"
-	"encoding/hex"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"os"
-	"path/filepath"
-	"regexp"
-	"strings"
-	"time"
-)
-
-const (
-	EndpointPath        = "/api/v1/nadi/agent/telemetry/batches"
-	MaximumBatchBytes   = 1024 * 1024
-	MaximumRecordBytes  = 64 * 1024
-	MaximumBatchRecords = 500
-)
-
-)
+	uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$`)
 
 	streamCapabilities = map[string]string{
 		"server_metrics":       "server_metrics",
@@ -302,21 +275,15 @@ func (s *Sender) buildPending(instanceID string, inputs []InputRecord) (*pending
 		if input.MetricSet != nil && len(*input.MetricSet) > 100 {
 			return nil, errors.New("telemetry metric_set exceeds 100 characters")
 		}
-
 		if IsServerStream(input.Stream) {
 			if input.ApplicationID != nil {
 				return nil, fmt.Errorf("server stream %s must not contain application_id", input.Stream)
 			}
-		} else {
-			if input.ApplicationID == nil || !uuidPattern.MatchString(*input.ApplicationID) {
-				return nil, fmt.Errorf("application stream %s requires a valid application_id UUID", input.Stream)
-			}
+		} else if input.ApplicationID == nil || !uuidPattern.MatchString(*input.ApplicationID) {
+			return nil, fmt.Errorf("application stream %s requires a valid application_id UUID", input.Stream)
 		}
 		if input.ApplicationID != nil && !uuidPattern.MatchString(*input.ApplicationID) {
 			return nil, errors.New("telemetry application_id must be a UUID")
-		}
-		if input.Source.EventID == "" {
-			return nil, errors.New("telemetry source event_id must not be empty")
 		}
 		scope := "server"
 		if input.ApplicationID != nil {
