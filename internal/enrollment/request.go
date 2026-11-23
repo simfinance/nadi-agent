@@ -55,17 +55,6 @@ func ReadManifest(path string) (Manifest, error) {
 }
 
 func BuildRequest(agentState state.State, token string, manifest Manifest) ([]byte, string, error) {
-	ipAddress, ipErr := readServerIPv4Address()
-	if ipErr != nil {
-		// Central defines server.ip_address as nullable; missing host IPv4 data
-		// must not block an otherwise valid Agent enrollment.
-		ipAddress = ""
-	}
-
-	return buildRequest(agentState, token, manifest, ipAddress)
-}
-
-func buildRequest(agentState state.State, token string, manifest Manifest, ipAddress string) ([]byte, string, error) {
 	token = strings.TrimSpace(token)
 	if len(token) != 76 {
 		return nil, "", errors.New("NADI_ENROLLMENT_TOKEN must contain exactly 76 characters")
@@ -85,6 +74,9 @@ func buildRequest(agentState state.State, token string, manifest Manifest, ipAdd
 	}
 
 	osName, osVersion := readOSRelease()
+	ipAddress, _ := readServerIPv4Address()
+	// Central defines server.ip_address as nullable, so missing IPv4 data
+	// must not block an otherwise valid Agent enrollment.
 
 	request := EnrollmentRequest{
 		EnrollmentToken: token,
