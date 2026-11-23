@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"nadi-agent/internal/nginxlogs"
 	"nadi-agent/internal/servermetrics"
 )
 
@@ -136,5 +137,47 @@ func TestClearRemovesQueuedTelemetry(t *testing.T) {
 	}
 	if len(records) != 0 {
 		t.Fatalf("expected empty spool, got %d records", len(records))
+	}
+}
+
+
+func TestAppendNginxErrorLogsPersistsServerScopedEvent(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "spool"), 1024*1024, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entry := nginxlogs.Entry{
+		Timestamp: time.Date(2026, 11, 23, 8, 0, 0, 0, time.UTC),
+		Severity:  "error",
+		Message:   "upstream connection failed",
+		Source:    "nginx",
+	}
+	appended, err := store.AppendNginxErrorLogs("server-1", "agent-1", []nginxlogs.Entry{entry})
+	if err != nil {
+		t.Fatalf("append Nginx error log: %v", err)
+	}
+
+	reopened, err := Open(filepath.Join(filepath.Dir(store.path), "spool-reopened"), 1024*1024, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = reopened
+
+	records, err := store.ReadBatch(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected one durable Nginx log event, got %d", len(records))
+	}
+	if records[0].EventID != appended.EventID || records[0].EventType != "nginx_error_logs" {
+		t.Fatalf("unexpected Nginx log spool record: %#v", records[0])
+	}
+	if records[0].Payload.NginxErrorLogs == nil || len(records[0].Payload.NginxErrorLogs) != 1 {
+		t.Fatalf("Nginx log payload was not persisted: %#v", records[0].Payload.NginxErrorLogs)
+	}
+	if records[0].Payload.NginxErrorLogs[0].Message != entry.Message {
+		t.Fatalf("unexpected persisted Nginx log entry: %#v", records[0].Payload.NginxErrorLogs[0])
 	}
 }
