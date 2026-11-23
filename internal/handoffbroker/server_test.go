@@ -284,49 +284,48 @@ func TestHandleConnectionRejectsUnexpectedPeerUID(t *testing.T) {
 	<-done
 }
 
-
 func TestValidateConfigRejectsCredentialPathInsideWritableApplicationTree(t *testing.T) {
-    config := Config{
-        SchemaVersion: 1,
-        AgentUID:      1001,
-        AgentGID:      1001,
-        Applications: []Mapping{
-            {
-                ApplicationID:       "app-1",
-                ApplicationKey:      "stable-key",
-                BasePath:            "/srv/www/app",
-                RuntimeUID:          33,
-                RuntimeGID:          33,
-                CredentialFile:      "/srv/www/app/storage/app/private/nadi/credential",
-                ActivationStateFile: "/run/nadi-agent/bridge-state/app-1.json",
-            },
-        },
-    }
+	config := Config{
+		SchemaVersion: 1,
+		AgentUID:      1001,
+		AgentGID:      1001,
+		Applications: []Mapping{
+			{
+				ApplicationID:       "app-1",
+				ApplicationKey:      "stable-key",
+				BasePath:            "/srv/www/app",
+				RuntimeUID:          33,
+				RuntimeGID:          33,
+				CredentialFile:      "/srv/www/app/storage/app/private/nadi/credential",
+				ActivationStateFile: "/run/nadi-agent/bridge-state/app-1.json",
+			},
+		},
+	}
 
-    if err := validateConfig(config); err == nil {
-        t.Fatal("credential inside the application tree must be rejected")
-    }
+	if err := validateConfig(config); err == nil {
+		t.Fatal("credential inside the application tree must be rejected")
+	}
 }
 
 func TestValidateConfigAcceptsRootOwnedExternalCredentialDirectory(t *testing.T) {
-    config := Config{
-        SchemaVersion: 1,
-        AgentUID:      1001,
-        AgentGID:      1001,
-        Applications: []Mapping{
-            {
-                ApplicationID:       "app-1",
-                ApplicationKey:      "stable-key",
-                BasePath:            "/srv/www/app",
-                RuntimeUID:          33,
-                RuntimeGID:          33,
-                CredentialFile:      "/var/lib/nadi-bridge/app-1/credential",
-                ActivationStateFile: "/run/nadi-agent/bridge-state/app-1.json",
-            },
-        },
-    }
+	config := Config{
+		SchemaVersion: 1,
+		AgentUID:      1001,
+		AgentGID:      1001,
+		Applications: []Mapping{
+			{
+				ApplicationID:       "app-1",
+				ApplicationKey:      "stable-key",
+				BasePath:            "/srv/www/app",
+				RuntimeUID:          33,
+				RuntimeGID:          33,
+				CredentialFile:      "/var/lib/nadi-bridge/app-1/credential",
+				ActivationStateFile: "/run/nadi-agent/bridge-state/app-1.json",
+			},
+		},
+	}
 
-    if err := validateConfig(config); err != nil {
-        t.Fatalf("safe external credential path was rejected: %v", err)
-    }
+	if err := validateConfig(config); err != nil {
+		t.Fatalf("safe external credential path was rejected: %v", err)
+	}
 }
