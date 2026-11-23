@@ -717,11 +717,10 @@ func TestSplitDoesNotAcknowledgeSharedSpoolEventBeforeAllChildBatches(t *testing
 	if err != nil {
 		t.Fatalf("inspect second split child: %v", err)
 	}
-	if !hasPending || len(pendingSources) != 2 {
-		t.Fatalf("expected both stream records to remain associated with the shared source: %#v", pendingSources)
-	}
-	if pendingSources[0].EventID != sharedSource.EventID || pendingSources[1].EventID != sharedSource.EventID {
-		t.Fatalf("shared source event ID changed across split children: %#v", pendingSources)
+	if !hasPending || len(pendingSources) != 1 ||
+		pendingSources[0].EventID != sharedSource.EventID ||
+		pendingSources[0].Stream != "database_metrics" {
+		t.Fatalf("expected only the still-pending database stream to remain: %#v", pendingSources)
 	}
 
 	finalAcknowledgement, err := sender.Send(context.Background(), "agent-1", "22222222-2222-4222-8222-222222222222", "credential", nil)
