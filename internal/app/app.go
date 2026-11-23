@@ -76,8 +76,12 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	a.logDedupe = logDedupe
 
+	nginxLogPath := ""
+	if a.config.SystemLogTelemetryEnabled {
+		nginxLogPath = a.config.NginxErrorLogPath
+	}
 	nginxErrorLogs, err := nginxlogs.NewDurableCollector(
-		a.config.NginxErrorLogPath,
+		nginxLogPath,
 		filepath.Join(a.config.StateDir, "nginx-error-log-cursor.json"),
 		nginxlogs.DefaultMaximumBytes,
 		nginxlogs.DefaultMaximumEntries,
