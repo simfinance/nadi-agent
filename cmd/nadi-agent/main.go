@@ -12,6 +12,7 @@ import (
 
 	"nadi-agent/internal/app"
 	"nadi-agent/internal/config"
+	"nadi-agent/internal/handoffbroker"
 	"nadi-agent/internal/logging"
 	"nadi-agent/internal/version"
 )
@@ -22,9 +23,38 @@ func main() {
 	manifestPath := flag.String("manifest", "", "Path to the Enrollment application manifest JSON")
 	enrollmentTokenStdin := flag.Bool("enrollment-token-stdin", false, "Read the one-time Enrollment token from stdin")
 	enrollmentSummaryStdout := flag.Bool("enrollment-summary-stdout", false, "Write non-secret enrollment identity metadata to stdout after enrollment")
+	runHandoffBroker := flag.Bool("handoff-broker", false, "Run the root-owned local Bridge credential handoff broker")
+	brokerConfigPath := flag.String("broker-config", "/etc/nadi-agent/bridge-mappings.json", "Root-owned Bridge application mapping file")
+	brokerSocketPath := flag.String("broker-socket", "/run/nadi-agent/credential-handoff.sock", "Fixed local handoff Unix socket")
 	rotateCredential := flag.Bool("rotate-credential", false, "Retrieve and acknowledge a pending Agent credential rotation")
 	deliveryID := flag.String("delivery-id", "", "Central credential delivery ID to retrieve")
 	flag.Parse()
+
+	if *runHandoffBroker {
+		if *showVersion || *enroll || *manifestPath != "" || *enrollmentTokenStdin || *enrollmentSummaryStdout || *rotateCredential || *deliveryID != "" {
+			fmt.Fprintln(os.Stderr, "--handoff-broker cannot be combined with Agent CLI operations")
+			os.Exit(2)
+		}
+
+		brokerConfig, err := handoffbroker.LoadConfig(*brokerConfigPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "NADI handoff broker configuration error: %v\\n", err)
+			os.Exit(1)
+		}
+
+		broker, err := handoffbroker.NewServer(*brokerSocketPath, brokerConfig)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "NADI handoff broker initialization error: %v\\n", err)
+			os.Exit(1)
+		}
+
+		if err := broker.ListenAndServe(); err != nil {
+			fmt.Fprintf(os.Stderr, "NADI handoff broker stopped: %v\\n", err)
+			os.Exit(1)
+		}
+
+		return
+	}
 
 	if *showVersion {
 		fmt.Printf("NADI Agent %s\n", version.Agent)
