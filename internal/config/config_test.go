@@ -65,7 +65,6 @@ func TestLoadRejectsInvalidLogTelemetrySetting(t *testing.T) {
 	}
 }
 
-
 func TestSystemLogTelemetryIsDisabledByDefault(t *testing.T) {
 	t.Setenv("NADI_AGENT_SYSTEM_LOG_TELEMETRY_ENABLED", "")
 	t.Setenv("NADI_AGENT_NGINX_ERROR_LOG_PATH", "")

@@ -221,7 +221,6 @@ func TestNormalizeApplicationLogRedactsSpacedAndCamelCaseAPIKeys(t *testing.T) {
 	}
 }
 
-
 func TestNormalizeApplicationLogAcceptsNullContextScalar(t *testing.T) {
 	raw := []byte(`{
 		"timestamp":"2026-11-23T08:00:00Z",

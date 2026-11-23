@@ -34,7 +34,6 @@ func TestNginxErrorLogFingerprintIsStableAndContentSensitive(t *testing.T) {
 	}
 }
 
-
 func TestCollectNginxErrorLogsPersistsBeforeAdvancingCursorAndSurvivesRestart(t *testing.T) {
 	directory := t.TempDir()
 	logPath := filepath.Join(directory, "error.log")
@@ -59,9 +58,9 @@ func TestCollectNginxErrorLogsPersistsBeforeAdvancingCursorAndSurvivesRestart(t 
 	}
 
 	agent := &App{
-		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
 		telemetrySpool: telemetrySpool,
-		logDedupe:     dedupe,
+		logDedupe:      dedupe,
 		nginxErrorLogs: collector,
 	}
 	identity := state.State{

@@ -22,18 +22,18 @@ type Collector struct {
 }
 
 type Snapshot struct {
-	Timestamp     time.Time             `json:"timestamp"`
-	Hostname      string                `json:"hostname"`
-	OS            string                `json:"os"`
-	Architecture  string                `json:"architecture"`
-	CPU           CPUStats              `json:"cpu"`
-	Memory        MemoryStats           `json:"memory"`
-	Disks         []DiskStats           `json:"disks"`
-	Network       []NetworkStats        `json:"network_interfaces"`
-	Nginx         nginxmonitor.Snapshot `json:"nginx"`
-	NginxErrorLogs []nginxlogs.Entry    `json:"nginx_error_logs,omitempty"`
-	LoadAverage   LoadAverage           `json:"load_average"`
-	UptimeSeconds float64               `json:"uptime_seconds"`
+	Timestamp      time.Time             `json:"timestamp"`
+	Hostname       string                `json:"hostname"`
+	OS             string                `json:"os"`
+	Architecture   string                `json:"architecture"`
+	CPU            CPUStats              `json:"cpu"`
+	Memory         MemoryStats           `json:"memory"`
+	Disks          []DiskStats           `json:"disks"`
+	Network        []NetworkStats        `json:"network_interfaces"`
+	Nginx          nginxmonitor.Snapshot `json:"nginx"`
+	NginxErrorLogs []nginxlogs.Entry     `json:"nginx_error_logs,omitempty"`
+	LoadAverage    LoadAverage           `json:"load_average"`
+	UptimeSeconds  float64               `json:"uptime_seconds"`
 }
 
 type CPUStats struct {

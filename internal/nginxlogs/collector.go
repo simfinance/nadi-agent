@@ -63,10 +63,10 @@ type Collector struct {
 }
 
 type Cursor struct {
-	Device      uint64 `json:"device"`
-	Inode       uint64 `json:"inode"`
-	Offset      int64  `json:"offset"`
-	ObservedSize int64 `json:"observed_size"`
+	Device       uint64 `json:"device"`
+	Inode        uint64 `json:"inode"`
+	Offset       int64  `json:"offset"`
+	ObservedSize int64  `json:"observed_size"`
 }
 
 func NewCollector(path string, maxBytes int64, maxEntries int) (*Collector, error) {

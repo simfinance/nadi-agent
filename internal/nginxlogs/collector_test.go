@@ -238,7 +238,6 @@ func TestParseLineMapsAllCentralSeverityNames(t *testing.T) {
 	}
 }
 
-
 func TestDurableCollectorReadsEntriesAcrossRestartWithoutSkipping(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "error.log")
@@ -339,7 +338,6 @@ func TestDurableCollectorFailsClosedWhenFileRotatesWithUnreadBytes(t *testing.T)
 		t.Fatal("expected rotation with unread bytes to fail closed")
 	}
 }
-
 
 func TestDurableCollectorDoesNotAdvancePastInvalidOversizedEntry(t *testing.T) {
 	directory := t.TempDir()

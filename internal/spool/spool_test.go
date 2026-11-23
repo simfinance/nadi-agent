@@ -140,7 +140,6 @@ func TestClearRemovesQueuedTelemetry(t *testing.T) {
 	}
 }
 
-
 func TestAppendNginxErrorLogsPersistsServerScopedEvent(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "spool"), 1024*1024, 10)
 	if err != nil {
