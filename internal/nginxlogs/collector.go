@@ -183,7 +183,7 @@ func (c *Collector) CollectWithCursor(now time.Time) (Snapshot, Cursor, error) {
 
 	consumed := 0
 	for consumed < len(content) {
-		newline := bytes.IndexByte(content[consumed:], '\\n')
+		newline := bytes.IndexByte(content[consumed:], '\n')
 		lineEnd := -1
 		lineLength := 0
 		if newline >= 0 {
@@ -230,7 +230,7 @@ func (c *Collector) Commit(cursor Cursor) error {
 	if err != nil {
 		return fmt.Errorf("encode Nginx error log cursor: %w", err)
 	}
-	content = append(content, '\\n')
+	content = append(content, '\n')
 
 	if err := os.MkdirAll(filepath.Dir(c.statePath), 0700); err != nil {
 		return fmt.Errorf("create Nginx error log cursor directory: %w", err)
