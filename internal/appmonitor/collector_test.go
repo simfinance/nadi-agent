@@ -182,13 +182,13 @@ func TestCollectApplicationLogsUsesExistingBridgeSummaryEndpoint(t *testing.T) {
 	}))
 	defer server.Close()
 
-	collector := NewCollector(time.Second, 1024*1024)
+	collector := NewCollector(time.Second)
 	snapshot := collector.Collect(
 		context.Background(),
 		server.URL,
 		"app-credential",
-		"11111111-1111-4111-8111-111111111111",
 		[]string{CapabilityApplicationLogs},
+		time.Now(),
 	)
 
 	if requestCount != 1 {
