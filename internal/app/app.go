@@ -325,6 +325,7 @@ collectionLoop:
 		}
 
 		if !hasCapability(decision.Capabilities, appmonitor.CapabilityApplicationMetrics) &&
+			!hasCapability(decision.Capabilities, appmonitor.CapabilityApplicationLogs) &&
 			!hasCapability(decision.Capabilities, appmonitor.CapabilityDatabaseMonitoring) {
 			a.logger.Info(
 				"Application collection skipped because the granted Bridge telemetry capabilities are unsupported",
@@ -386,6 +387,7 @@ collectionLoop:
 
 func hasApplicationMonitoringCapability(capabilities []string) bool {
 	return hasCapability(capabilities, appmonitor.CapabilityApplicationMetrics) ||
+		hasCapability(capabilities, appmonitor.CapabilityApplicationLogs) ||
 		hasCapability(capabilities, appmonitor.CapabilityDatabaseMonitoring) ||
 		hasCapability(capabilities, appmonitor.CapabilityQueueMonitoring) ||
 		hasCapability(capabilities, appmonitor.CapabilitySchedulerMonitoring)
