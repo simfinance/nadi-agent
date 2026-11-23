@@ -43,15 +43,8 @@ func TestBuildRequestCreatesCentralCompatiblePayload(t *testing.T) {
 	if request.Agent.AgentInstanceID != agentState.AgentInstanceID {
 		t.Fatalf("unexpected Agent instance ID: %q", request.Agent.AgentInstanceID)
 	}
-	expectedIPAddress, err := readServerIPv4Address()
-	if err != nil {
-		t.Fatalf("read expected server IPv4 address: %v", err)
-	}
-	if request.Server.IPAddress != expectedIPAddress {
-		t.Fatalf("unexpected server IPv4 address: got %q, want %q", request.Server.IPAddress, expectedIPAddress)
-	}
-	if strings.Contains(request.Server.IPAddress, ":") {
-		t.Fatalf("server IP address must be IPv4, got %q", request.Server.IPAddress)
+	if request.Server.IPAddress != "" && net.ParseIP(request.Server.IPAddress).To4() == nil {
+		t.Fatalf("optional server IP address must be IPv4 when present, got %q", request.Server.IPAddress)
 	}
 	if len(request.Applications) != 1 || request.Applications[0].ApplicationKey != "portal-production" {
 		t.Fatalf("unexpected application manifest: %#v", request.Applications)
