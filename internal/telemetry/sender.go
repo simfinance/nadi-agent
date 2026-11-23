@@ -346,6 +346,26 @@ func (s *Sender) PendingSources() ([]Source, bool, error) {
 }
 
 func (s *Sender) DiscardPending() error {
+	pending, err := s.loadPending()
+	if err != nil {
+		return err
+	}
+	if pending == nil {
+		return nil
+	}
+
+	for _, batch := range flattenPendingBatches(*pending) {
+		entry := QuarantineEntry{
+			QuarantinedAt: time.Now().UTC(),
+			StatusCode:    0,
+			Reason:        "local Activation Gate closed; pending telemetry retained in quarantine",
+			Pending:       batch,
+		}
+		if err := s.appendQuarantine(entry); err != nil {
+			return fmt.Errorf("quarantine pending telemetry while Activation Gate is closed: %w", err)
+		}
+	}
+
 	return s.removePending()
 }
 
@@ -535,6 +555,16 @@ func (s *Sender) quarantinePending(statusCode int, reason string) error {
 		Reason:        reason,
 		Pending:       entryPending,
 	}
+	if err := s.appendQuarantine(entry); err != nil {
+		return err
+	}
+
+	pending.Sources = quarantinedSources
+	return s.savePending(*pending)
+}
+
+
+func (s *Sender) appendQuarantine(entry QuarantineEntry) error {
 	content, err := json.Marshal(entry)
 	if err != nil {
 		return fmt.Errorf("encode telemetry quarantine entry: %w", err)
@@ -564,9 +594,17 @@ func (s *Sender) quarantinePending(statusCode int, reason string) error {
 	if err := syncDirectory(s.dir); err != nil {
 		return fmt.Errorf("sync telemetry quarantine directory: %w", err)
 	}
+	return nil
+}
 
-	pending.Sources = quarantinedSources
-	return s.savePending(*pending)
+func flattenPendingBatches(pending pendingBatch) []pendingBatch {
+	current := pending
+	current.Following = nil
+	result := []pendingBatch{current}
+	for _, following := range pending.Following {
+		result = append(result, flattenPendingBatches(following)...)
+	}
+	return result
 }
 
 func (s *Sender) acknowledgedSourcesOrAdvance(pending *pendingBatch) ([]Source, error) {
