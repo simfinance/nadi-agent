@@ -61,8 +61,8 @@ func (a *App) publishBridgeHandoff(
 			MonitoringEnabled: false,
 			GrantAcknowledged: false,
 			Capabilities:      []string{},
-			ObservedAt:        observedAt.Format(time.RFC3339),
-			ValidUntil:        observedAt.Add(5 * time.Minute).Format(time.RFC3339),
+			ObservedAt:        observedAt.Format(time.RFC3339Nano),
+			ValidUntil:        observedAt.Add(5 * time.Minute).Format(time.RFC3339Nano),
 		}
 
 		if decision.Enabled {
