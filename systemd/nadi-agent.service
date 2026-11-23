@@ -1,8 +1,8 @@
 [Unit]
 Description=NADI Agent
 Documentation=https://nadi.pesantrenalirsyad.org
-Wants=network-online.target
-After=network-online.target
+Wants=network-online.target nadi-handoff-broker.service
+After=network-online.target nadi-handoff-broker.service
 
 [Service]
 Type=simple
