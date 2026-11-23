@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -15,6 +16,8 @@ import (
 	"nadi-agent/internal/config"
 	"nadi-agent/internal/control"
 	"nadi-agent/internal/identity"
+	"nadi-agent/internal/logdedupe"
+	"nadi-agent/internal/nginxlogs"
 	"nadi-agent/internal/servermetrics"
 	"nadi-agent/internal/spool"
 	"nadi-agent/internal/state"
@@ -27,9 +30,11 @@ type App struct {
 	controlHTTP        *control.Client
 	serverMetrics      *servermetrics.Collector
 	applicationMetrics *appmonitor.Collector
+	nginxErrorLogs     *nginxlogs.Collector
 	telemetrySpool     *spool.Store
 	applicationSpool   *appspool.Store
 	telemetrySender    *telemetry.Sender
+	logDedupe          *logdedupe.Store
 }
 
 func New(cfg config.Config, logger *slog.Logger) *App {
@@ -64,6 +69,27 @@ func (a *App) Run(ctx context.Context) error {
 		return fmt.Errorf("initialize per-application telemetry spool: %w", err)
 	}
 	a.applicationSpool = applicationSpool
+
+	logDedupe, err := logdedupe.Open(filepath.Join(a.config.StateDir, "log-dedupe"))
+	if err != nil {
+		return fmt.Errorf("initialize durable log fingerprint state: %w", err)
+	}
+	a.logDedupe = logDedupe
+
+	nginxLogPath := ""
+	if a.config.SystemLogTelemetryEnabled {
+		nginxLogPath = a.config.NginxErrorLogPath
+	}
+	nginxErrorLogs, err := nginxlogs.NewDurableCollector(
+		nginxLogPath,
+		filepath.Join(a.config.StateDir, "nginx-error-log-cursor.json"),
+		nginxlogs.DefaultMaximumBytes,
+		nginxlogs.DefaultMaximumEntries,
+	)
+	if err != nil {
+		return fmt.Errorf("initialize Nginx error log collector: %w", err)
+	}
+	a.nginxErrorLogs = nginxErrorLogs
 
 	telemetrySender, err := telemetry.NewSender(
 		a.config.CentralURL,
@@ -165,6 +191,7 @@ func (a *App) runControlPoll(ctx context.Context, store *state.Store, agentState
 			}
 		}
 
+		pollImmediately := false
 		pollData, err := a.controlHTTP.Poll(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -224,12 +251,18 @@ func (a *App) runControlPoll(ctx context.Context, store *state.Store, agentState
 					a.collectServerMetrics(latestState)
 				} else {
 					a.serverMetrics.Reset()
-					if err := a.telemetrySpool.Clear(); err != nil {
-						a.logger.Error("Unable to clear telemetry spool while Runtime Activation Gate is closed", "error", err)
-					}
+					a.logger.Debug("Server collection remains stopped while Runtime Activation Gate is closed; durable spool is retained")
+				}
+				if a.config.SystemLogTelemetryEnabled && serverStreamAllowed(gateDecisions, "nginx_error_logs") {
+					a.collectNginxErrorLogs(latestState)
 				}
 				if err := a.deliverTelemetry(ctx, latestState, serverMetricsAllowed, gateDecisions); err != nil {
-					a.logger.Warn("Central telemetry delivery remains pending; local spool is retained", "error", err)
+					if errors.Is(err, ErrControlPollRequired) {
+						pollImmediately = true
+						a.logger.Warn("Central returned HTTP 410 for telemetry scope; Control Poll will be refreshed immediately")
+					} else {
+						a.logger.Warn("Central telemetry delivery remains pending; local spool is retained", "error", err)
+					}
 				}
 			}
 		}
@@ -241,7 +274,7 @@ func (a *App) runControlPoll(ctx context.Context, store *state.Store, agentState
 			)
 		}
 
-		if !wait(ctx, a.config.PollInterval) {
+		if !pollImmediately && !wait(ctx, a.config.PollInterval) {
 			break
 		}
 	}
@@ -304,16 +337,34 @@ collectionLoop:
 	for _, application := range agentState.Applications {
 		decision, found := decisions[application.ApplicationID]
 		if !found || !decision.Enabled {
-			if err := a.applicationSpool.Clear(application.ApplicationID); err != nil {
-				a.logger.Error("Unable to clear application spool while Activation Gate is closed", "application_id", application.ApplicationID, "error", err)
-			}
+			a.logger.Debug(
+				"Application collection remains stopped while Activation Gate is closed; durable spool is retained",
+				"application_id", application.ApplicationID,
+			)
 			continue
 		}
 
-		if !hasApplicationMonitoringCapability(decision.Capabilities) {
-			if err := a.applicationSpool.Clear(application.ApplicationID); err != nil {
-				a.logger.Error("Unable to clear application spool without an application monitoring capability", "application_id", application.ApplicationID, "error", err)
-			}
+		capabilities := append([]string(nil), decision.Capabilities...)
+		if !a.config.LogTelemetryEnabled {
+			capabilities = withoutCapability(capabilities, appmonitor.CapabilityApplicationLogs)
+		}
+
+		if !hasApplicationMonitoringCapability(capabilities) {
+			a.logger.Debug(
+				"Application collection skipped because no supported monitoring capability is granted; durable spool is retained",
+				"application_id", application.ApplicationID,
+			)
+			continue
+		}
+
+		if !hasCapability(capabilities, appmonitor.CapabilityApplicationMetrics) &&
+			!hasCapability(capabilities, appmonitor.CapabilityApplicationLogs) &&
+			!hasCapability(capabilities, appmonitor.CapabilityDatabaseMonitoring) {
+			a.logger.Info(
+				"Application collection skipped because the granted Bridge telemetry capabilities are unsupported",
+				"application_id", application.ApplicationID,
+				"capabilities", decision.Capabilities,
+			)
 			continue
 		}
 
@@ -324,7 +375,7 @@ collectionLoop:
 		}
 
 		workers.Add(1)
-		go func(application state.EnrolledApplication, decision activation.GateDecision) {
+		go func(application state.EnrolledApplication, decision activation.GateDecision, capabilities []string) {
 			defer workers.Done()
 			defer func() {
 				<-semaphore
@@ -335,9 +386,54 @@ collectionLoop:
 				ctx,
 				application.Endpoint,
 				application.ApplicationCredential,
-				decision.Capabilities,
+				capabilities,
 				now,
 			)
+			var logFingerprints []string
+			if a.config.LogTelemetryEnabled &&
+				hasCapability(capabilities, appmonitor.CapabilityApplicationLogs) &&
+				snapshot.Logs.Status == appmonitor.StatusAvailable &&
+				len(snapshot.Logs.Data) > 0 {
+				filtered, fingerprints, filterErr := filterApplicationLogSummary(
+					a.logDedupe,
+					application.ApplicationID,
+					snapshot.Logs.Data,
+				)
+				if filterErr != nil {
+					a.logger.Warn(
+						"Bridge application log summary could not be deduplicated; log telemetry skipped for this poll",
+						"application_id", application.ApplicationID,
+						"error", filterErr,
+					)
+					snapshot.Logs.Status = appmonitor.StatusUnavailable
+					snapshot.Logs.ErrorCode = "log_fingerprint_filter_failed"
+					snapshot.Logs.Data = nil
+				} else {
+					candidate := appspool.Record{
+						ApplicationID: application.ApplicationID,
+						Timestamp:     now,
+						Payload: appmonitor.Snapshot{
+							Logs: appmonitor.EndpointResult{
+								Status: appmonitor.StatusAvailable,
+								Data:   filtered,
+							},
+						},
+					}
+					if _, validationErr := buildApplicationLogInputs(candidate); validationErr != nil {
+						a.logger.Warn(
+							"Bridge application log summary failed Central v1.1 schema validation; log telemetry skipped for this poll",
+							"application_id", application.ApplicationID,
+							"error", validationErr,
+						)
+						snapshot.Logs.Status = appmonitor.StatusUnavailable
+						snapshot.Logs.ErrorCode = "log_payload_validation_failed"
+						snapshot.Logs.Data = nil
+					} else {
+						snapshot.Logs.Data = filtered
+						logFingerprints = fingerprints
+					}
+				}
+			}
 			record, err := a.applicationSpool.Append(
 				agentState.CentralServerID,
 				agentState.CentralAgentID,
@@ -347,6 +443,15 @@ collectionLoop:
 			if err != nil {
 				a.logger.Error("Application metrics could not be persisted to the isolated spool", "application_id", application.ApplicationID, "error", err)
 				return
+			}
+			if len(logFingerprints) > 0 {
+				if err := a.logDedupe.Commit("application:"+application.ApplicationID, logFingerprints); err != nil {
+					a.logger.Error(
+						"Application log fingerprints could not be persisted after the spool append; duplicate summaries may be collected again",
+						"application_id", application.ApplicationID,
+						"error", err,
+					)
+				}
 			}
 
 			a.logger.Info(
@@ -361,7 +466,7 @@ collectionLoop:
 				"queue_status", snapshot.Queue.Status,
 				"scheduler_status", snapshot.Scheduler.Status,
 			)
-		}(application, decision)
+		}(application, decision, capabilities)
 	}
 
 	workers.Wait()
@@ -369,7 +474,18 @@ collectionLoop:
 
 func hasApplicationMonitoringCapability(capabilities []string) bool {
 	return hasCapability(capabilities, appmonitor.CapabilityApplicationMetrics) ||
+		hasCapability(capabilities, appmonitor.CapabilityApplicationLogs) ||
 		hasCapability(capabilities, appmonitor.CapabilityDatabaseMonitoring) ||
 		hasCapability(capabilities, appmonitor.CapabilityQueueMonitoring) ||
 		hasCapability(capabilities, appmonitor.CapabilitySchedulerMonitoring)
+}
+
+func withoutCapability(capabilities []string, excluded string) []string {
+	filtered := make([]string, 0, len(capabilities))
+	for _, capability := range capabilities {
+		if capability != excluded {
+			filtered = append(filtered, capability)
+		}
+	}
+	return filtered
 }

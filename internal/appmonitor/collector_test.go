@@ -151,3 +151,86 @@ func TestCollectDoesNotFollowRedirects(t *testing.T) {
 		t.Fatal("collector followed an application endpoint redirect")
 	}
 }
+
+func TestCollectApplicationLogsUsesExistingBridgeSummaryEndpoint(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requestCount++
+		if request.URL.Path != "/_nadi/v1/logs/application" {
+			t.Fatalf("unexpected Bridge path %q", request.URL.Path)
+		}
+		if request.Header.Get("Authorization") != "Bearer app-credential" {
+			t.Fatal("application credential was not used for Bridge request")
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{
+			"success":true,
+			"data":{
+				"status":"ok",
+				"source":"laravel_application",
+				"entries":[{
+					"timestamp":"2026-11-23T08:00:00Z",
+					"level":"ERROR",
+					"exception_type":"RuntimeException",
+					"fingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+				}],
+				"count":1,
+				"truncated":false,
+				"checked_at":"2026-11-23T08:00:00Z"
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	collector := NewCollector(time.Second)
+	collector.client = server.Client()
+	snapshot := collector.Collect(
+		context.Background(),
+		server.URL+"/_nadi/v1",
+		"app-credential",
+		[]string{CapabilityApplicationLogs},
+		time.Now(),
+	)
+
+	if requestCount != 1 {
+		t.Fatalf("expected one Bridge application log request, got %d", requestCount)
+	}
+	if snapshot.Logs.Status != StatusAvailable {
+		t.Fatalf("expected application logs available, got %s (%s)", snapshot.Logs.Status, snapshot.Logs.ErrorCode)
+	}
+	if len(snapshot.Logs.Data) == 0 {
+		t.Fatal("expected Bridge application log summary payload")
+	}
+}
+
+func TestCollectMarksApplicationLogsUnsupportedOnBridge501(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusNotImplemented)
+		_, _ = writer.Write([]byte(`{"success":false,"error":{"code":"endpoint_not_implemented","message":"unsupported"}}`))
+	}))
+	defer server.Close()
+
+	collector := NewCollector(time.Second)
+	collector.client = server.Client()
+	snapshot := collector.Collect(
+		context.Background(),
+		server.URL+"/_nadi/v1",
+		"app-credential",
+		[]string{CapabilityApplicationLogs},
+		time.Now(),
+	)
+
+	if snapshot.Logs.Status != StatusUnsupported {
+		t.Fatalf("expected unsupported application logs status, got %s", snapshot.Logs.Status)
+	}
+}
+
+func TestEndpointURLAllowsOnlyTheKnownNestedApplicationLogsRoute(t *testing.T) {
+	baseURL := "https://example.test/_nadi/v1"
+	if _, err := endpointURL(baseURL, "logs/application"); err != nil {
+		t.Fatalf("known application log route should be accepted: %v", err)
+	}
+	if _, err := endpointURL(baseURL, "logs/unknown"); err == nil {
+		t.Fatal("unknown nested Bridge routes must be rejected")
+	}
+}
