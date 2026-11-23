@@ -109,6 +109,11 @@ func LoadConfig(path string) (Config, error) {
         return Config{}, errors.New("opened broker mapping file metadata is invalid")
     }
 
+    openedStat, ok := openedMetadata.Sys().(*syscall.Stat_t)
+    if !ok || openedStat.Uid != 0 || openedMetadata.Mode().Perm()&0022 != 0 {
+        return Config{}, errors.New("opened broker mapping file ownership or permissions are invalid")
+    }
+
     content, err := io.ReadAll(io.LimitReader(mappingFile, MaximumRequestBytes+1))
     if err != nil || len(content) > MaximumRequestBytes {
         return Config{}, errors.New("broker mapping file could not be read within the size limit")
@@ -420,7 +425,7 @@ func atomicWriteFile(path string, content []byte, uid int, gid int, mode os.File
     }
 
     parent := filepath.Dir(path)
-    if err := ensureNoSymlinkPath(parent); err != nil {
+    if err := ensureRootOwnedDirectory(parent); err != nil {
         return err
     }
 
@@ -549,13 +554,13 @@ func ensureRootOwnedDirectory(path string) error {
 }
 
 func readBoundedLine(connection net.Conn, maximum int64) ([]byte, error) {
-    reader := io.LimitReader(connection, maximum+1)
-    line, err := io.ReadAll(reader)
+    reader := bufio.NewReader(io.LimitReader(connection, maximum+1))
+    line, err := reader.ReadBytes('\n')
     if err != nil {
         return nil, err
     }
 
-    if len(line) == 0 || int64(len(line)) > maximum || line[len(line)-1] != '\n' {
+    if len(line) == 0 || int64(len(line)) > maximum {
         return nil, errors.New("request must be one bounded newline-terminated JSON object")
     }
 
