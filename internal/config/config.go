@@ -21,6 +21,8 @@ type Config struct {
 	ActivationPublicKeyPath string
 	ActivationKeyID         string
 	LogTelemetryEnabled     bool
+	SystemLogTelemetryEnabled bool
+	NginxErrorLogPath         string
 }
 
 func Load() (Config, error) {
@@ -35,6 +37,8 @@ func Load() (Config, error) {
 		ActivationPublicKeyPath: envOrDefault("NADI_ACTIVATION_PUBLIC_KEY", "/etc/nadi-agent/keys/activation-public.pem"),
 		ActivationKeyID:         envOrDefault("NADI_ACTIVATION_KEY_ID", "nadi-central-2026-01"),
 		LogTelemetryEnabled:     false,
+		SystemLogTelemetryEnabled: false,
+		NginxErrorLogPath:         strings.TrimSpace(os.Getenv("NADI_AGENT_NGINX_ERROR_LOG_PATH")),
 	}
 
 	if value := strings.TrimSpace(os.Getenv("NADI_AGENT_LOG_TELEMETRY_ENABLED")); value != "" {
@@ -43,6 +47,14 @@ func Load() (Config, error) {
 			return Config{}, errors.New("NADI_AGENT_LOG_TELEMETRY_ENABLED must be true or false")
 		}
 		cfg.LogTelemetryEnabled = enabled
+	}
+
+	if value := strings.TrimSpace(os.Getenv("NADI_AGENT_SYSTEM_LOG_TELEMETRY_ENABLED")); value != "" {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return Config{}, errors.New("NADI_AGENT_SYSTEM_LOG_TELEMETRY_ENABLED must be true or false")
+		}
+		cfg.SystemLogTelemetryEnabled = enabled
 	}
 
 	if value := strings.TrimSpace(os.Getenv("NADI_POLL_INTERVAL_SECONDS")); value != "" {
@@ -96,6 +108,10 @@ func (c Config) Validate() error {
 
 	if strings.TrimSpace(c.StateDir) == "" {
 		return errors.New("NADI_STATE_DIR must not be empty")
+	}
+
+	if c.SystemLogTelemetryEnabled && strings.TrimSpace(c.NginxErrorLogPath) == "" {
+		return errors.New("NADI_AGENT_NGINX_ERROR_LOG_PATH is required when system log telemetry is enabled")
 	}
 
 	return nil
