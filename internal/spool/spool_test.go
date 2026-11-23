@@ -157,6 +157,9 @@ func TestAppendNginxErrorLogsPersistsServerScopedEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("append Nginx error log: %v", err)
 	}
+	if len(appended) != 1 {
+		t.Fatalf("expected one Nginx spool event, got %d", len(appended))
+	}
 
 	records, err := store.ReadBatch(10)
 	if err != nil {
@@ -165,7 +168,7 @@ func TestAppendNginxErrorLogsPersistsServerScopedEvent(t *testing.T) {
 	if len(records) != 1 {
 		t.Fatalf("expected one durable Nginx log event, got %d", len(records))
 	}
-	if records[0].EventID != appended.EventID || records[0].EventType != "nginx_error_logs" {
+	if records[0].EventID != appended[0].EventID || records[0].EventType != "nginx_error_logs" {
 		t.Fatalf("unexpected Nginx log spool record: %#v", records[0])
 	}
 	if records[0].Payload.NginxErrorLogs == nil || len(records[0].Payload.NginxErrorLogs) != 1 {
