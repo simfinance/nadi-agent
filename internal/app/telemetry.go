@@ -30,7 +30,9 @@ func (a *App) deliverTelemetry(
 	}
 	if hasPending {
 		for _, source := range pendingSources {
-			if source.Kind == "server" && !serverStreamAllowed(decisions, source.Stream) {
+			if source.Kind == "server" &&
+				(source.Stream == "nginx_error_logs" && !a.config.SystemLogTelemetryEnabled ||
+					!serverStreamAllowed(decisions, source.Stream)) {
 				if err := a.telemetrySender.DiscardPending(); err != nil {
 					return fmt.Errorf("quarantine pending server telemetry after capability gate closed: %w", err)
 				}
@@ -50,26 +52,67 @@ func (a *App) deliverTelemetry(
 	inputs := make([]telemetry.InputRecord, 0, 500)
 	emptyApplicationEvents := make(map[string][]string)
 
-	if serverMetricsAllowed {
-		serverRecords, err := a.telemetrySpool.ReadBatch(telemetry.MaximumBatchRecords)
+	serverLogsAllowed := a.config.SystemLogTelemetryEnabled &&
+		serverStreamAllowed(decisions, "nginx_error_logs")
+	if serverMetricsAllowed || serverLogsAllowed {
+		serverRecords, err := a.telemetrySpool.ReadBatch(10000)
 		if err != nil {
 			return fmt.Errorf("read server telemetry spool: %w", err)
 		}
 		for _, record := range serverRecords {
-			data, err := json.Marshal(record.Payload)
-			if err != nil {
-				return fmt.Errorf("encode server metrics snapshot: %w", err)
+			if len(inputs) >= telemetry.MaximumBatchRecords {
+				break
 			}
-			inputs = append(inputs, telemetry.InputRecord{
-				Stream:      "server_metrics",
-				ObservedAt:  record.Timestamp,
-				CollectedAt: record.Timestamp,
-				Data:        data,
-				Source: telemetry.Source{
-					Kind:    "server",
-					EventID: record.EventID,
-				},
-			})
+
+			switch record.EventType {
+			case "server_metrics":
+				if !serverMetricsAllowed {
+					continue
+				}
+				data, err := json.Marshal(record.Payload)
+				if err != nil {
+					return fmt.Errorf("encode server metrics snapshot: %w", err)
+				}
+				inputs = append(inputs, telemetry.InputRecord{
+					Stream:      "server_metrics",
+					ObservedAt:  record.Timestamp,
+					CollectedAt: record.Timestamp,
+					Data:        data,
+					Source: telemetry.Source{
+						Kind:    "server",
+						EventID: record.EventID,
+					},
+				})
+			case "nginx_error_logs":
+				if !serverLogsAllowed {
+					continue
+				}
+				if len(inputs)+len(record.Payload.NginxErrorLogs) > telemetry.MaximumBatchRecords {
+					break
+				}
+				for index, entry := range record.Payload.NginxErrorLogs {
+					raw, err := json.Marshal(entry)
+					if err != nil {
+						return fmt.Errorf("encode Nginx error log entry %d: %w", index, err)
+					}
+					normalized, err := logtelemetry.NormalizeNginxErrorLog(raw)
+					if err != nil {
+						return fmt.Errorf("validate Nginx error log entry %d: %w", index, err)
+					}
+					inputs = append(inputs, telemetry.InputRecord{
+						Stream:      "nginx_error_logs",
+						ObservedAt:  entry.Timestamp,
+						CollectedAt: record.Timestamp,
+						Data:        normalized,
+						Source: telemetry.Source{
+							Kind:    "server",
+							EventID: record.EventID,
+						},
+					})
+				}
+			default:
+				return fmt.Errorf("unsupported server spool event type %q", record.EventType)
+			}
 		}
 	}
 
