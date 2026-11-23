@@ -239,7 +239,6 @@ func applicationStreamAllowed(
 	return found && decision.Enabled && hasCapability(decision.Capabilities, requiredCapability)
 }
 
-
 type bridgeApplicationLogPayload struct {
 	Source  string `json:"source"`
 	Entries []struct {
