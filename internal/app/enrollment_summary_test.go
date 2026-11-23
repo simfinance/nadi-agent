@@ -19,19 +19,19 @@ func TestWriteEnrollmentSummaryOmitsCredentialMaterial(t *testing.T) {
 	}
 
 	current := state.State{
-		AgentInstanceID: "agent-instance-1",
-		CentralAgentID: "central-agent-1",
-		CentralServerID: "central-server-1",
-		AgentCredential: "agent-secret-must-not-be-exported",
+		AgentInstanceID:  "agent-instance-1",
+		CentralAgentID:   "central-agent-1",
+		CentralServerID:  "central-server-1",
+		AgentCredential:  "agent-secret-must-not-be-exported",
 		EnrollmentStatus: "registered",
-		CreatedAt: time.Now().UTC(),
+		CreatedAt:        time.Now().UTC(),
 		Applications: []state.EnrolledApplication{
 			{
-				ApplicationID: "application-1",
-				ApplicationKey: "application-key-1",
-				ApplicationName: "Example",
-				Environment: "production",
-				RegistrationID: "registration-1",
+				ApplicationID:         "application-1",
+				ApplicationKey:        "application-key-1",
+				ApplicationName:       "Example",
+				Environment:           "production",
+				RegistrationID:        "registration-1",
 				ApplicationCredential: "application-secret-must-not-be-exported",
 			},
 		},
@@ -90,7 +90,7 @@ func TestWriteEnrollmentSummaryRejectsUnregisteredAgent(t *testing.T) {
 	}
 
 	if err := store.Save(state.State{
-		AgentInstanceID: "agent-instance-1",
+		AgentInstanceID:  "agent-instance-1",
 		EnrollmentStatus: "unregistered",
 	}); err != nil {
 		t.Fatal(err)

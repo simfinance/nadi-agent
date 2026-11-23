@@ -10,20 +10,20 @@ import (
 )
 
 type EnrollmentSummary struct {
-	ProtocolVersion int                          `json:"protocol_version"`
-	EnrollmentStatus string                      `json:"enrollment_status"`
-	AgentInstanceID string                       `json:"agent_instance_id"`
-	AgentID string                               `json:"agent_id"`
-	ServerID string                              `json:"server_id"`
-	Applications []EnrollmentApplicationSummary  `json:"applications"`
+	ProtocolVersion  int                            `json:"protocol_version"`
+	EnrollmentStatus string                         `json:"enrollment_status"`
+	AgentInstanceID  string                         `json:"agent_instance_id"`
+	AgentID          string                         `json:"agent_id"`
+	ServerID         string                         `json:"server_id"`
+	Applications     []EnrollmentApplicationSummary `json:"applications"`
 }
 
 type EnrollmentApplicationSummary struct {
-	ApplicationID string `json:"application_id"`
-	ApplicationKey string `json:"application_key"`
+	ApplicationID   string `json:"application_id"`
+	ApplicationKey  string `json:"application_key"`
 	ApplicationName string `json:"application_name"`
-	Environment string `json:"environment"`
-	RegistrationID string `json:"registration_id"`
+	Environment     string `json:"environment"`
+	RegistrationID  string `json:"registration_id"`
 }
 
 func (a *App) WriteEnrollmentSummary(writer io.Writer) error {
@@ -51,12 +51,12 @@ func (a *App) WriteEnrollmentSummary(writer io.Writer) error {
 	}
 
 	summary := EnrollmentSummary{
-		ProtocolVersion: 1,
+		ProtocolVersion:  1,
 		EnrollmentStatus: current.EnrollmentStatus,
-		AgentInstanceID: current.AgentInstanceID,
-		AgentID: current.CentralAgentID,
-		ServerID: current.CentralServerID,
-		Applications: make([]EnrollmentApplicationSummary, 0, len(current.Applications)),
+		AgentInstanceID:  current.AgentInstanceID,
+		AgentID:          current.CentralAgentID,
+		ServerID:         current.CentralServerID,
+		Applications:     make([]EnrollmentApplicationSummary, 0, len(current.Applications)),
 	}
 
 	seenIDs := make(map[string]struct{}, len(current.Applications))
@@ -79,11 +79,11 @@ func (a *App) WriteEnrollmentSummary(writer io.Writer) error {
 		seenKeys[application.ApplicationKey] = struct{}{}
 
 		summary.Applications = append(summary.Applications, EnrollmentApplicationSummary{
-			ApplicationID: application.ApplicationID,
-			ApplicationKey: application.ApplicationKey,
+			ApplicationID:   application.ApplicationID,
+			ApplicationKey:  application.ApplicationKey,
 			ApplicationName: application.ApplicationName,
-			Environment: application.Environment,
-			RegistrationID: application.RegistrationID,
+			Environment:     application.Environment,
+			RegistrationID:  application.RegistrationID,
 		})
 	}
 
