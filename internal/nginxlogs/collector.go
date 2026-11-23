@@ -21,9 +21,9 @@ const (
 )
 
 var (
-	linePattern = regexp.MustCompile(`^(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}) \[(emerg|alert|crit|error|warn|notice|info|debug)\] \d+#\d+: (.*)$`)
-	ipv4Pattern = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
-	ipv6Pattern = regexp.MustCompile(`\b[0-9a-fA-F:]{3,}\b`)
+	linePattern   = regexp.MustCompile(`^(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}) \[(emerg|alert|crit|error|warn|notice|info|debug)\] \d+#\d+: (.*)$`)
+	ipv4Pattern   = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
+	ipv6Pattern   = regexp.MustCompile(`\b[0-9a-fA-F:]{3,}\b`)
 	quotedPattern = regexp.MustCompile(`"[^"]*"`)
 	secretPattern = regexp.MustCompile(`(?i)(token|password|passwd|secret|authorization|api[_-]?key)=([^\s,;]+)`)
 )
@@ -153,9 +153,12 @@ func (c *Collector) readBoundedFile() ([]byte, error) {
 		return nil, err
 	}
 	content := make([]byte, size-start)
-	if _, err := io.ReadFull(file, content); err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
-		return nil, err
+	readCount, readErr := io.ReadFull(file, content)
+	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+		return nil, readErr
 	}
+	content = content[:readCount]
+
 	if start > 0 {
 		if newline := strings.IndexByte(string(content), '\n'); newline >= 0 {
 			content = content[newline+1:]

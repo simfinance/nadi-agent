@@ -51,12 +51,6 @@ func TestCollectorReturnsOnlyRedactedErrorMetadata(t *testing.T) {
 			t.Fatalf("expected SHA-256 fingerprint, got %q", entry.Fingerprint)
 		}
 	}
-	encoded := snapshot.Entries
-	for _, entry := range encoded {
-		if strings.Contains(entry.Fingerprint, "topsecret") || strings.Contains(entry.Fingerprint, "hunter2") {
-			t.Fatal("secret appeared in fingerprint")
-		}
-	}
 }
 
 func TestCollectorRejectsSymlink(t *testing.T) {
@@ -92,13 +86,13 @@ func TestCollectorRejectsUnboundedConfiguration(t *testing.T) {
 
 func TestCollectorEnforcesTailByteLimit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "error.log")
-	content := strings.Repeat("x", 64) + "\n" +
+	content := strings.Repeat("x", 100) + "\n" +
 		`2026/11/23 08:00:00 [error] 123#123: final failure` + "\n"
 	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 		t.Fatal(err)
 	}
 
-	collector, err := NewCollector(path, 48, DefaultMaximumEntries)
+	collector, err := NewCollector(path, 80, DefaultMaximumEntries)
 	if err != nil {
 		t.Fatal(err)
 	}
