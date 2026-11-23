@@ -183,11 +183,11 @@ func (s *Server) ListenAndServe() error {
 		return errors.New("broker socket directory is not a safe directory")
 	}
 
-	if err := os.Chown(socketDirectory, 0, int(s.config.AgentGID)); err != nil {
+	if err := os.Chown(socketDirectory, 0, 0); err != nil {
 		return fmt.Errorf("set broker socket directory group: %w", err)
 	}
 
-	if err := os.Chmod(socketDirectory, 0750); err != nil {
+	if err := os.Chmod(socketDirectory, 0711); err != nil {
 		return fmt.Errorf("secure broker socket directory: %w", err)
 	}
 
