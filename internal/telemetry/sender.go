@@ -528,6 +528,322 @@ func inputSourceKey(source Source) string {
 	return source.Kind + "|" + source.ApplicationID + "|" + source.EventID
 }
 
+
+func (s *Sender) splitPending(pending pendingBatch) error {
+	middle := len(pending.Batch.Records) / 2
+	if middle <= 0 || middle >= len(pending.Batch.Records) {
+		return errors.New("telemetry batch cannot be split")
+	}
+
+	leftID, err := newUUID()
+	if err != nil {
+		return err
+	}
+	rightID, err := newUUID()
+	if err != nil {
+		return err
+	}
+
+	left := pendingBatch{
+		CompletedSources: append([]Source(nil), pending.CompletedSources...),
+		Batch: Batch{
+			ProtocolVersion: pending.Batch.ProtocolVersion,
+			BatchID:         leftID,
+			AgentInstanceID: pending.Batch.AgentInstanceID,
+			SentAt:          time.Now().UTC(),
+			Records:         append([]Record(nil), pending.Batch.Records[:middle]...),
+		},
+		Sources: append([]Source(nil), pending.Sources[:middle]...),
+	}
+	right := pendingBatch{
+		Batch: Batch{
+			ProtocolVersion: pending.Batch.ProtocolVersion,
+			BatchID:         rightID,
+			AgentInstanceID: pending.Batch.AgentInstanceID,
+			SentAt:          time.Now().UTC(),
+			Records:         append([]Record(nil), pending.Batch.Records[middle:]...),
+		},
+		Sources: append([]Source(nil), pending.Sources[middle:]...),
+	}
+	left.Following = append([]pendingBatch{right}, pending.Following...)
+	return s.savePending(left)
+}
+
+func (s *Sender) quarantinePending(statusCode int, reason string) error {
+	pending, err := s.loadPending()
+	if err != nil {
+		return err
+	}
+	if pending == nil {
+		return nil
+	}
+
+	quarantinedSources := markQuarantined(pending.Sources, statusCode)
+	entryPending := *pending
+	entryPending.Sources = quarantinedSources
+	entryPending.Following = nil
+	entry := QuarantineEntry{
+		QuarantinedAt: time.Now().UTC(),
+		StatusCode:    statusCode,
+		Reason:        reason,
+		Pending:       entryPending,
+	}
+	if err := s.appendQuarantine(entry); err != nil {
+		return err
+	}
+
+	pending.Sources = quarantinedSources
+	return s.savePending(*pending)
+}
+
+func (s *Sender) appendQuarantine(entry QuarantineEntry) error {
+	content, err := json.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("encode telemetry quarantine entry: %w", err)
+	}
+	content = append(content, '\n')
+
+	path := filepath.Join(s.dir, "quarantine.ndjson")
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return fmt.Errorf("open telemetry quarantine file: %w", err)
+	}
+	if err := file.Chmod(0600); err != nil {
+		file.Close()
+		return fmt.Errorf("secure telemetry quarantine file: %w", err)
+	}
+	if _, err := file.Write(content); err != nil {
+		file.Close()
+		return fmt.Errorf("write telemetry quarantine entry: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		file.Close()
+		return fmt.Errorf("sync telemetry quarantine entry: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close telemetry quarantine file: %w", err)
+	}
+	if err := syncDirectory(s.dir); err != nil {
+		return fmt.Errorf("sync telemetry quarantine directory: %w", err)
+	}
+	return nil
+}
+
+func flattenPendingBatches(pending pendingBatch) []pendingBatch {
+	current := pending
+	current.Following = nil
+	result := []pendingBatch{current}
+	for _, following := range pending.Following {
+		result = append(result, flattenPendingBatches(following)...)
+	}
+	return result
+}
+
+func (s *Sender) acknowledgedSourcesOrAdvance(pending *pendingBatch) ([]Source, error) {
+	sources := acknowledgeableSources(
+		mergeSources(pending.CompletedSources, pending.Sources),
+		pending.Following,
+	)
+	if len(sources) == 0 && len(pending.Following) > 0 {
+		if err := s.Complete(); err != nil {
+			return nil, fmt.Errorf("advance acknowledged split batch: %w", err)
+		}
+		return nil, nil
+	}
+	return sources, nil
+}
+
+func (s *Sender) quarantinedSourcesOrAdvance(pending *pendingBatch, statusCode int) ([]Source, error) {
+	if err := s.quarantinePending(statusCode, fmt.Sprintf("Central rejected telemetry with HTTP %d", statusCode)); err != nil {
+		return nil, fmt.Errorf("persist telemetry quarantine: %w", err)
+	}
+
+	updated, err := s.loadPending()
+	if err != nil {
+		return nil, err
+	}
+	if updated == nil {
+		return nil, errors.New("quarantined telemetry pending state disappeared")
+	}
+
+	sources := acknowledgeableSources(
+		mergeSources(updated.CompletedSources, updated.Sources),
+		updated.Following,
+	)
+	if len(sources) == 0 && len(updated.Following) > 0 {
+		if err := s.Complete(); err != nil {
+			return nil, fmt.Errorf("advance quarantined split batch: %w", err)
+		}
+		if statusCode == http.StatusGone {
+			return nil, &HTTPStatusError{
+				StatusCode: statusCode,
+				Message:    "scope rejected; Control Poll must refresh",
+			}
+		}
+		return nil, nil
+	}
+	return sources, nil
+}
+
+func flattenFollowingSources(following []pendingBatch) []Source {
+	var sources []Source
+	for _, pending := range following {
+		sources = mergeSources(sources, pending.CompletedSources)
+		sources = mergeSources(sources, pending.Sources)
+		sources = mergeSources(sources, flattenFollowingSources(pending.Following))
+	}
+	return sources
+}
+
+func flattenFollowingDeliverySources(following []pendingBatch) []Source {
+	var sources []Source
+	for _, pending := range following {
+		sources = mergeSources(sources, pending.Sources)
+		sources = mergeSources(sources, flattenFollowingDeliverySources(pending.Following))
+	}
+	return sources
+}
+
+func sourceEventKey(source Source) string {
+	return source.Kind + "|" + source.ApplicationID + "|" + source.EventID
+}
+
+func sourceRecordKey(source Source) string {
+	return sourceEventKey(source) + "|" + source.Stream
+}
+
+func mergeSources(groups ...[]Source) []Source {
+	merged := make([]Source, 0)
+	indices := make(map[string]int)
+	for _, group := range groups {
+		for _, source := range group {
+			key := sourceRecordKey(source)
+			if index, found := indices[key]; found {
+				if source.Quarantined {
+					merged[index].Quarantined = true
+					merged[index].QuarantineStatus = source.QuarantineStatus
+				}
+				continue
+			}
+			indices[key] = len(merged)
+			merged = append(merged, source)
+		}
+	}
+	return merged
+}
+
+func sourcesStillPending(candidates []Source, following []pendingBatch) []Source {
+	if len(candidates) == 0 {
+		return nil
+	}
+	future := make(map[string]struct{})
+	addSourcesToSet(future, flattenFollowingSources(following))
+
+	result := make([]Source, 0, len(candidates))
+	for _, source := range candidates {
+		if _, found := future[sourceEventKey(source)]; found {
+			result = append(result, source)
+		}
+	}
+	return mergeSources(result)
+}
+
+func acknowledgeableSources(candidates []Source, following []pendingBatch) []Source {
+	if len(candidates) == 0 {
+		return nil
+	}
+	future := make(map[string]struct{})
+	addSourcesToSet(future, flattenFollowingSources(following))
+
+	result := make([]Source, 0, len(candidates))
+	for _, source := range candidates {
+		if _, found := future[sourceEventKey(source)]; !found {
+			result = append(result, source)
+		}
+	}
+	return mergeAcknowledgedSources(result)
+}
+
+func mergeAcknowledgedSources(sources []Source) []Source {
+	merged := make([]Source, 0)
+	indices := make(map[string]int)
+	for _, source := range sources {
+		key := sourceEventKey(source)
+		if index, found := indices[key]; found {
+			if source.Quarantined {
+				merged[index].Quarantined = true
+				merged[index].QuarantineStatus = source.QuarantineStatus
+			}
+			continue
+		}
+		indices[key] = len(merged)
+		merged = append(merged, source)
+	}
+	return merged
+}
+
+func addSourcesToSet(target map[string]struct{}, sources []Source) {
+	for _, source := range sources {
+		target[sourceEventKey(source)] = struct{}{}
+	}
+}
+
+func markQuarantined(sources []Source, statusCode int) []Source {
+	result := append([]Source(nil), sources...)
+	for index := range result {
+		result[index].Quarantined = true
+		result[index].QuarantineStatus = statusCode
+	}
+	return result
+}
+
+func exponentialBackoff(attempt int) time.Duration {
+	delay := time.Second * time.Duration(1<<attempt)
+	if delay > 30*time.Second {
+		delay = 30 * time.Second
+	}
+	return time.Duration(float64(delay) * (0.5 + mathrand.Float64()))
+}
+
+func parseRetryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil && seconds >= 0 {
+		delay := time.Duration(seconds) * time.Second
+		if delay > 5*time.Minute {
+			return 5 * time.Minute
+		}
+		return delay
+	}
+	if parsed, err := http.ParseTime(value); err == nil {
+		delay := parsed.Sub(now)
+		if delay < 0 {
+			return 0
+		}
+		if delay > 5*time.Minute {
+			return 5 * time.Minute
+		}
+		return delay
+	}
+	return 0
+}
+
+func waitRetry(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
 func (s *Sender) loadPending() (*pendingBatch, error) {
 	content, err := os.ReadFile(filepath.Join(s.dir, "pending-batch.json"))
 	if errors.Is(err, os.ErrNotExist) {
