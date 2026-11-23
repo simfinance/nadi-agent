@@ -1,0 +1,30 @@
+[Unit]
+Description=NADI Agent Bridge Handoff Broker
+Documentation=https://nadi.pesantrenalirsyad.org
+After=local-fs.target
+Before=nadi-agent.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/opt/nadi/bin/nadi-agent --handoff-broker --broker-config /etc/nadi-agent/bridge-mappings.json --broker-socket /run/nadi-agent/credential-handoff.sock
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+ReadWritePaths=/run/nadi-agent /var/lib/nadi-bridge
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target
