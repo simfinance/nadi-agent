@@ -33,7 +33,7 @@ The root-owned file `/etc/nadi-agent/bridge-mappings.json` uses schema version 1
 }
 ```
 
-The numeric runtime UID/GID must be discovered from the actual Laravel PHP-FPM pool. The example UID/GID 33 represents a common `www-data` installation only; it is not a universal default. Mapping file owner must be root and group/other write bits must be clear. The file is bounded to 16 KiB.
+The numeric runtime UID/GID must be discovered from the actual Laravel PHP-FPM pool. The example UID/GID 33 represents a common `www-data` installation only; it is not a universal default. Mapping file owner/group must be `root:root`, mode `0600`, and its parent directory must be root-owned and not group/other writable. The file is bounded to 16 KiB.
 
 ## Operations
 
@@ -50,6 +50,7 @@ The broker preserves Central grant capability names. Bridge endpoint mapping is 
 - Socket: owner `root:nadi-agent`, mode `0660`.
 - Activation state directory: `/run/nadi-agent/bridge-state`, owner `root:root`, mode `0711`.
 - Activation assertion: owner `root:<Laravel runtime group>`, mode `0640`.
+- Credential parent directory: root-owned, not group/other writable, and provisioned so the Laravel runtime can traverse it (for example `root:<runtime group>` mode `0710`).
 - Application credential: owner `<Laravel runtime user>:<Laravel runtime group>`, mode `0600`.
 
 The Laravel runtime can traverse the activation-state directory and read only its configured assertion file. It cannot list the directory or write assertions. The Agent can connect to the socket but cannot read the root-owned mapping file.
