@@ -193,9 +193,11 @@ func (a *App) deliverTelemetry(
 	serverEventIDs := make([]string, 0, len(acknowledged))
 	applicationEventIDs := make(map[string][]string)
 	quarantinedCount := 0
+	quarantineStatuses := make(map[int]int)
 	for _, source := range acknowledged {
 		if source.Quarantined {
 			quarantinedCount++
+			quarantineStatuses[source.QuarantineStatus]++
 		}
 		switch source.Kind {
 		case "server":
