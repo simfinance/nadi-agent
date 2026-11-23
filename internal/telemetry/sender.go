@@ -563,7 +563,6 @@ func (s *Sender) quarantinePending(statusCode int, reason string) error {
 	return s.savePending(*pending)
 }
 
-
 func (s *Sender) appendQuarantine(entry QuarantineEntry) error {
 	content, err := json.Marshal(entry)
 	if err != nil {
