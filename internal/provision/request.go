@@ -170,8 +170,8 @@ func validateProvisionRequest(request ProvisionRequest) ([]byte, []byte, error) 
 		}
 
 		applicationURL, urlErr := url.ParseRequestURI(application.BaseURL)
-		if urlErr != nil || applicationURL.Scheme != "https" || applicationURL.Host == "" {
-			return nil, nil, errors.New("enrollment manifest application base_url must be an absolute HTTPS URL")
+		if urlErr != nil || applicationURL.Scheme != "https" || applicationURL.Host == "" || applicationURL.User != nil {
+			return nil, nil, errors.New("enrollment manifest application base_url must be an absolute HTTPS URL without user information")
 		}
 
 		if _, exists := manifestKeys[application.ApplicationKey]; exists {
@@ -186,8 +186,10 @@ func validateProvisionRequest(request ProvisionRequest) ([]byte, []byte, error) 
 	seenKeys := make(map[string]struct{}, len(request.Applications))
 
 	for _, application := range request.Applications {
-		if application.ApplicationKey == "" || !filepath.IsAbs(application.BasePath) ||
-			filepath.Clean(application.BasePath) != application.BasePath {
+		if application.ApplicationKey == "" || len(application.ApplicationKey) > 100 ||
+			!filepath.IsAbs(application.BasePath) ||
+			filepath.Clean(application.BasePath) != application.BasePath ||
+			application.BasePath == string(filepath.Separator) {
 			return nil, nil, errors.New("application key and canonical absolute base path are required")
 		}
 
