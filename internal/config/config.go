@@ -23,6 +23,7 @@ type Config struct {
 	LogTelemetryEnabled       bool
 	SystemLogTelemetryEnabled bool
 	NginxErrorLogPath         string
+	HandoffSocketPath         string
 }
 
 func Load() (Config, error) {
@@ -39,6 +40,7 @@ func Load() (Config, error) {
 		LogTelemetryEnabled:       false,
 		SystemLogTelemetryEnabled: false,
 		NginxErrorLogPath:         strings.TrimSpace(os.Getenv("NADI_AGENT_NGINX_ERROR_LOG_PATH")),
+		HandoffSocketPath:         envOrDefault("NADI_AGENT_HANDOFF_SOCKET", "/run/nadi-agent/credential-handoff.sock"),
 	}
 
 	if value := strings.TrimSpace(os.Getenv("NADI_AGENT_LOG_TELEMETRY_ENABLED")); value != "" {
@@ -108,6 +110,10 @@ func (c Config) Validate() error {
 
 	if strings.TrimSpace(c.StateDir) == "" {
 		return errors.New("NADI_STATE_DIR must not be empty")
+	}
+
+	if !strings.HasPrefix(c.HandoffSocketPath, "/") {
+		return errors.New("NADI_AGENT_HANDOFF_SOCKET must be an absolute path")
 	}
 
 	if c.SystemLogTelemetryEnabled && strings.TrimSpace(c.NginxErrorLogPath) == "" {
