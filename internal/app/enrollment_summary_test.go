@@ -82,6 +82,76 @@ func TestWriteEnrollmentSummaryOmitsCredentialMaterial(t *testing.T) {
 	}
 }
 
+func TestWriteEnrollmentSummarySupportsMultipleApplicationsForOneAgent(t *testing.T) {
+	stateDirectory := t.TempDir()
+	store, err := state.Open(stateDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	current := state.State{
+		AgentInstanceID:  "agent-instance-multi",
+		CentralAgentID:   "central-agent-multi",
+		CentralServerID:  "central-server-multi",
+		EnrollmentStatus: "registered",
+		Applications: []state.EnrolledApplication{
+			{
+				ApplicationID:   "application-1",
+				ApplicationKey:  "application-key-1",
+				ApplicationName: "Application One",
+				Environment:     "production",
+				RegistrationID:  "registration-1",
+			},
+			{
+				ApplicationID:   "application-2",
+				ApplicationKey:  "application-key-2",
+				ApplicationName: "Application Two",
+				Environment:     "staging",
+				RegistrationID:  "registration-2",
+			},
+		},
+	}
+
+	if err := store.Save(current); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	application := &App{
+		config: config.Config{
+			StateDir: stateDirectory,
+		},
+	}
+
+	var output bytes.Buffer
+
+	if err := application.WriteEnrollmentSummary(&output); err != nil {
+		t.Fatal(err)
+	}
+
+	var summary EnrollmentSummary
+
+	if err := json.Unmarshal(output.Bytes(), &summary); err != nil {
+		t.Fatal(err)
+	}
+
+	if summary.AgentID != "central-agent-multi" {
+		t.Fatalf("unexpected Agent identity: %q", summary.AgentID)
+	}
+
+	if len(summary.Applications) != 2 {
+		t.Fatalf("expected two applications for one Agent, got %d", len(summary.Applications))
+	}
+
+	if summary.Applications[0].ApplicationID != "application-1" ||
+		summary.Applications[1].ApplicationID != "application-2" {
+		t.Fatalf("unexpected application identities: %#v", summary.Applications)
+	}
+}
+
 func TestWriteEnrollmentSummaryRejectsUnregisteredAgent(t *testing.T) {
 	stateDirectory := t.TempDir()
 	store, err := state.Open(stateDirectory)
