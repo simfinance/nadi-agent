@@ -194,7 +194,6 @@ func applicationTelemetryAllowed(
 	return found && decision.Enabled && hasApplicationMonitoringCapability(decision.Capabilities)
 }
 
-
 func serverStreamAllowed(
 	decisions map[string]activation.GateDecision,
 	stream string,

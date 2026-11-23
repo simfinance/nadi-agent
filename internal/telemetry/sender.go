@@ -746,7 +746,6 @@ func addSourcesToSet(target map[string]struct{}, sources []Source) {
 	}
 }
 
-
 func markQuarantined(sources []Source, statusCode int) []Source {
 	result := append([]Source(nil), sources...)
 	for index := range result {

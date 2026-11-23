@@ -86,14 +86,13 @@ func TestApplicationTelemetryAllowed(t *testing.T) {
 	}
 }
 
-
 func TestApplicationStreamAllowedRequiresExactApplicationCapability(t *testing.T) {
 	tests := []struct {
-		name         string
-		application  string
-		stream       string
-		decisions    map[string]activation.GateDecision
-		expected     bool
+		name        string
+		application string
+		stream      string
+		decisions   map[string]activation.GateDecision
+		expected    bool
 	}{
 		{
 			name:        "application metrics exact capability",
