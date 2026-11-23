@@ -104,7 +104,6 @@ func TestNormalizeApplicationLogRejectsUnknownFieldsAndInvalidContext(t *testing
 		"null context":            `{` + base + `,"context":null}`,
 		"array context":           `{` + base + `,"context":[]}`,
 		"nested context":          `{` + base + `,"context":{"nested":{"value":1}}}`,
-		"null context value":      `{` + base + `,"context":{"value":null}}`,
 		"stack trace key":         `{` + base + `,"context":{"stack_trace":"secret"}}`,
 		"stack trace value":       `{` + base + `,"context":{"detail":" at App.Service.Runner"}}`,
 	}
@@ -219,5 +218,29 @@ func TestNormalizeApplicationLogRedactsSpacedAndCamelCaseAPIKeys(t *testing.T) {
 	}
 	if result.Context["apiKey"] != "[REDACTED]" {
 		t.Fatalf("camelCase API key context was not redacted: %#v", result.Context)
+	}
+}
+
+
+func TestNormalizeApplicationLogAcceptsNullContextScalar(t *testing.T) {
+	raw := []byte(`{
+		"timestamp":"2026-11-23T08:00:00Z",
+		"level":"info",
+		"channel":"app",
+		"message":"ready",
+		"context":{"optional":null}
+	}`)
+
+	normalized, err := NormalizeApplicationLog(raw)
+	if err != nil {
+		t.Fatalf("normalize null context scalar: %v", err)
+	}
+
+	var result ApplicationLog
+	if err := json.Unmarshal(normalized, &result); err != nil {
+		t.Fatalf("decode normalized application log: %v", err)
+	}
+	if value, exists := result.Context["optional"]; !exists || value != nil {
+		t.Fatalf("expected null scalar to be preserved, got %#v", result.Context)
 	}
 }
