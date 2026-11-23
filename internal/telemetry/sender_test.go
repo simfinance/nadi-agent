@@ -338,8 +338,8 @@ func TestSendQuarantinesPermanentCentralStatuses(t *testing.T) {
 			if err != nil {
 				t.Fatalf("send permanent rejection: %v", err)
 			}
-			if len(sources) != 1 || !sources[0].Quarantined {
-				t.Fatalf("expected source to be locally quarantined, got %#v", sources)
+			if len(sources) != 1 || !sources[0].Quarantined || sources[0].QuarantineStatus != statusCode {
+				t.Fatalf("expected source to be locally quarantined with HTTP %d, got %#v", statusCode, sources)
 			}
 			if _, err := os.Stat(filepath.Join(directory, "quarantine.ndjson")); err != nil {
 				t.Fatalf("quarantine was not persisted: %v", err)
