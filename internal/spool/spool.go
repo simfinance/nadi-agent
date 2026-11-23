@@ -122,66 +122,75 @@ func (s *Store) AppendNginxErrorLogs(
 	serverID string,
 	agentID string,
 	entries []nginxlogs.Entry,
-) (Record, error) {
+) ([]Record, error) {
 	if strings.TrimSpace(serverID) == "" || strings.TrimSpace(agentID) == "" {
-		return Record{}, errors.New("server_id and agent_id are required for Nginx error logs")
+		return nil, errors.New("server_id and agent_id are required for Nginx error logs")
 	}
 	if len(entries) == 0 {
-		return Record{}, errors.New("at least one Nginx error log entry is required")
+		return nil, errors.New("at least one Nginx error log entry is required")
 	}
 
-	eventID, err := newEventID()
-	if err != nil {
-		return Record{}, err
+	records := make([]Record, 0, len(entries))
+	for _, entry := range entries {
+		eventID, err := newEventID()
+		if err != nil {
+			return records, err
+		}
+
+		timestamp := time.Now().UTC()
+		record := Record{
+			EventID:   eventID,
+			EventType: "nginx_error_logs",
+			ServerID:  serverID,
+			AgentID:   agentID,
+			Timestamp: timestamp,
+			Payload: servermetrics.Snapshot{
+				Timestamp:      timestamp,
+				NginxErrorLogs: []nginxlogs.Entry{entry},
+			},
+		}
+
+		encoded, err := json.Marshal(record)
+		if err != nil {
+			return records, fmt.Errorf("encode Nginx error log spool record: %w", err)
+		}
+		if len(encoded) > MaxRecordBytes {
+			return records, fmt.Errorf("Nginx error log spool record exceeds %d bytes", MaxRecordBytes)
+		}
+		encoded = append(encoded, '\\n')
+
+		currentSize, currentRecords, err := s.measure()
+		if err != nil {
+			return records, err
+		}
+		if currentRecords >= s.maxRecords || currentSize+int64(len(encoded)) > s.maxBytes {
+			return records, ErrFull
+		}
+
+		file, err := os.OpenFile(s.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			return records, fmt.Errorf("open telemetry spool for Nginx error logs: %w", err)
+		}
+		if err := file.Chmod(0600); err != nil {
+			file.Close()
+			return records, fmt.Errorf("secure telemetry spool for Nginx error logs: %w", err)
+		}
+		if _, err := file.Write(encoded); err != nil {
+			file.Close()
+			return records, fmt.Errorf("append Nginx error log spool record: %w", err)
+		}
+		if err := file.Sync(); err != nil {
+			file.Close()
+			return records, fmt.Errorf("sync Nginx error log spool record: %w", err)
+		}
+		if err := file.Close(); err != nil {
+			return records, fmt.Errorf("close Nginx error log spool: %w", err)
+		}
+
+		records = append(records, record)
 	}
 
-	timestamp := time.Now().UTC()
-	record := Record{
-		EventID:   eventID,
-		EventType: "nginx_error_logs",
-		ServerID:  serverID,
-		AgentID:   agentID,
-		Timestamp: timestamp,
-		Payload: servermetrics.Snapshot{
-			Timestamp:     timestamp,
-			NginxErrorLogs: append([]nginxlogs.Entry(nil), entries...),
-		},
-	}
-
-	encoded, err := json.Marshal(record)
-	if err != nil {
-		return Record{}, fmt.Errorf("encode Nginx error log spool record: %w", err)
-	}
-	if len(encoded) > MaxRecordBytes {
-		return Record{}, fmt.Errorf("Nginx error log spool record exceeds %d bytes", MaxRecordBytes)
-	}
-	encoded = append(encoded, '\\n')
-
-	currentSize, currentRecords, err := s.measure()
-	if err != nil {
-		return Record{}, err
-	}
-	if currentRecords >= s.maxRecords || currentSize+int64(len(encoded)) > s.maxBytes {
-		return Record{}, ErrFull
-	}
-
-	file, err := os.OpenFile(s.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-	if err != nil {
-		return Record{}, fmt.Errorf("open telemetry spool for Nginx error logs: %w", err)
-	}
-	defer file.Close()
-
-	if err := file.Chmod(0600); err != nil {
-		return Record{}, fmt.Errorf("secure telemetry spool for Nginx error logs: %w", err)
-	}
-	if _, err := file.Write(encoded); err != nil {
-		return Record{}, fmt.Errorf("append Nginx error log spool record: %w", err)
-	}
-	if err := file.Sync(); err != nil {
-		return Record{}, fmt.Errorf("sync Nginx error log spool record: %w", err)
-	}
-
-	return record, nil
+	return records, nil
 }
 
 func (s *Store) ReadBatch(limit int) ([]Record, error) {
