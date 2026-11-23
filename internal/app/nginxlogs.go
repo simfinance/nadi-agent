@@ -64,6 +64,9 @@ func (a *App) collectNginxErrorLogs(agentState state.State) {
 		}
 	}
 	if len(entries) == 0 {
+		if err := a.nginxErrorLogs.Commit(cursor); err != nil {
+			a.logger.Error("Nginx error log cursor could not be persisted after deduplication", "error", err)
+		}
 		return
 	}
 
