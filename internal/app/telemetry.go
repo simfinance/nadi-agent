@@ -2,12 +2,16 @@ package app
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 
 	"nadi-agent/internal/activation"
+	"nadi-agent/internal/appmonitor"
+	"nadi-agent/internal/appspool"
+	"nadi-agent/internal/logtelemetry"
 	"nadi-agent/internal/state"
 	"nadi-agent/internal/telemetry"
 )
@@ -109,8 +113,8 @@ func (a *App) deliverTelemetry(
 				})
 			}
 
-			if hasCapability(decision.Capabilities, "database_monitoring") &&
-				(record.Payload.Database.Status == "available" || record.Payload.Database.Status == "degraded") &&
+			if hasCapability(decision.Capabilities, appmonitor.CapabilityDatabaseMonitoring) &&
+				(record.Payload.Database.Status == appmonitor.StatusAvailable || record.Payload.Database.Status == appmonitor.StatusDegraded) &&
 				len(record.Payload.Database.Data) > 0 {
 				inputs = append(inputs, telemetry.InputRecord{
 					Stream:        "database_metrics",
@@ -120,6 +124,16 @@ func (a *App) deliverTelemetry(
 					Data:          append(json.RawMessage(nil), record.Payload.Database.Data...),
 					Source:        source,
 				})
+			}
+
+			if hasCapability(decision.Capabilities, appmonitor.CapabilityApplicationLogs) &&
+				record.Payload.Logs.Status == appmonitor.StatusAvailable &&
+				len(record.Payload.Logs.Data) > 0 {
+				logInputs, err := buildApplicationLogInputs(record)
+				if err != nil {
+					return fmt.Errorf("normalize application log summary for %s: %w", application.ApplicationID, err)
+				}
+				inputs = append(inputs, logInputs...)
 			}
 		}
 	}
@@ -223,4 +237,78 @@ func applicationStreamAllowed(
 
 	decision, found := decisions[applicationID]
 	return found && decision.Enabled && hasCapability(decision.Capabilities, requiredCapability)
+}
+
+
+type bridgeApplicationLogPayload struct {
+	Source  string `json:"source"`
+	Entries []struct {
+		Timestamp     string `json:"timestamp"`
+		Level         string `json:"level"`
+		ExceptionType string `json:"exception_type"`
+		Fingerprint   string `json:"fingerprint"`
+	} `json:"entries"`
+}
+
+func buildApplicationLogInputs(record appspool.Record) ([]telemetry.InputRecord, error) {
+	var payload bridgeApplicationLogPayload
+	if err := json.Unmarshal(record.Payload.Logs.Data, &payload); err != nil {
+		return nil, fmt.Errorf("decode Bridge application log summary: %w", err)
+	}
+	if payload.Source != "laravel_application" {
+		return nil, fmt.Errorf("unexpected Bridge application log source %q", payload.Source)
+	}
+	if len(payload.Entries) > 100 {
+		return nil, errors.New("Bridge application log response exceeds 100 entries")
+	}
+
+	applicationID := record.ApplicationID
+	inputs := make([]telemetry.InputRecord, 0, len(payload.Entries))
+	for index, entry := range payload.Entries {
+		if len(entry.Fingerprint) != 64 {
+			return nil, fmt.Errorf("Bridge application log entry %d has an invalid fingerprint", index)
+		}
+		if _, err := hex.DecodeString(entry.Fingerprint); err != nil {
+			return nil, fmt.Errorf("Bridge application log entry %d has a non-hex fingerprint", index)
+		}
+
+		message := "Laravel application error (unclassified)"
+		contextFields := map[string]any{
+			"fingerprint": entry.Fingerprint,
+		}
+		if entry.ExceptionType != "" {
+			message = "Laravel exception: " + entry.ExceptionType
+			contextFields["exception_type"] = entry.ExceptionType
+		}
+
+		raw, err := json.Marshal(map[string]any{
+			"timestamp": entry.Timestamp,
+			"level":     entry.Level,
+			"channel":   payload.Source,
+			"message":   message,
+			"context":   contextFields,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("encode application log summary %d: %w", index, err)
+		}
+
+		normalized, err := logtelemetry.NormalizeApplicationLog(raw)
+		if err != nil {
+			return nil, fmt.Errorf("validate application log summary %d: %w", index, err)
+		}
+
+		inputs = append(inputs, telemetry.InputRecord{
+			Stream:        "application_logs",
+			ObservedAt:    record.Timestamp,
+			CollectedAt:   record.Timestamp,
+			ApplicationID: &applicationID,
+			Data:          normalized,
+			Source: telemetry.Source{
+				Kind:          "application",
+				ApplicationID: record.ApplicationID,
+				EventID:       record.EventID,
+			},
+		})
+	}
+	return inputs, nil
 }
