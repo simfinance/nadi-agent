@@ -195,3 +195,28 @@ func TestResponseNeverIncludesRawCredential(t *testing.T) {
         t.Fatal("response unexpectedly contains credential material")
     }
 }
+
+func TestValidateMonotonicObservationRejectsOlderUpdate(t *testing.T) {
+    previous := "2026-11-23T10:00:00Z"
+    next := "2026-11-23T09:59:59Z"
+
+    if err := validateMonotonicObservation(previous, next); err == nil {
+        t.Fatal("older activation assertion must be rejected")
+    }
+}
+
+func TestDecodeRequestRejectsCredentialFieldsOnActivationOperation(t *testing.T) {
+    payload := []byte(`{"protocol_version":1,"operation":"publish_activation_state","application_id":"app-1","application_key":"stable-key","activation_state":"unknown","monitoring_enabled":false,"grant_acknowledged":false,"capabilities":[],"observed_at":"2026-11-23T10:00:00Z","valid_until":"2026-11-23T10:05:00Z","credential":"unexpected"}`)
+
+    if _, err := decodeRequest(payload); err == nil {
+        t.Fatal("credential field must not be accepted on activation operation")
+    }
+}
+
+func TestDecodeRequestRequiresExplicitCapabilitiesArray(t *testing.T) {
+    payload := []byte(`{"protocol_version":1,"operation":"publish_activation_state","application_id":"app-1","application_key":"stable-key","activation_state":"unknown","monitoring_enabled":false,"grant_acknowledged":false,"observed_at":"2026-11-23T10:00:00Z","valid_until":"2026-11-23T10:05:00Z"}`)
+
+    if _, err := decodeRequest(payload); err == nil {
+        t.Fatal("activation request must include the capabilities array")
+    }
+}
