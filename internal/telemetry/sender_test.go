@@ -817,3 +817,58 @@ func TestDiscardPendingQuarantinesEverySplitChildDurably(t *testing.T) {
 		t.Fatalf("quarantine did not preserve all source events: %#v", eventIDs)
 	}
 }
+
+
+func TestBuildPendingNeverCutsOneSpoolEventAtTheRecordLimit(t *testing.T) {
+	sender, err := NewSender("https://central.example", t.TempDir(), time.Second)
+	if err != nil {
+		t.Fatalf("create sender: %v", err)
+	}
+
+	applicationID := "11111111-1111-4111-8111-111111111111"
+	inputs := make([]InputRecord, 0, MaximumBatchRecords+1)
+	for index := 0; index < MaximumBatchRecords-1; index++ {
+		inputs = append(inputs, InputRecord{
+			Stream:        "application_metrics",
+			ApplicationID: &applicationID,
+			Data:          json.RawMessage(`{}`),
+			Source: Source{
+				Kind:          "application",
+				ApplicationID: applicationID,
+				EventID:       fmt.Sprintf("single-event-%d", index),
+			},
+		})
+	}
+	sharedSource := Source{
+		Kind:          "application",
+		ApplicationID: applicationID,
+		EventID:       "two-record-event",
+	}
+	inputs = append(inputs,
+		InputRecord{
+			Stream:        "application_metrics",
+			ApplicationID: &applicationID,
+			Data:          json.RawMessage(`{}`),
+			Source:        sharedSource,
+		},
+		InputRecord{
+			Stream:        "database_metrics",
+			ApplicationID: &applicationID,
+			Data:          json.RawMessage(`{}`),
+			Source:        sharedSource,
+		},
+	)
+
+	pending, err := sender.buildPending("22222222-2222-4222-8222-222222222222", inputs)
+	if err != nil {
+		t.Fatalf("build source-atomic batch: %v", err)
+	}
+	if len(pending.Batch.Records) != MaximumBatchRecords-1 {
+		t.Fatalf("expected the builder to stop before the two-record source event, got %d records", len(pending.Batch.Records))
+	}
+	for _, source := range pending.Sources {
+		if source.EventID == sharedSource.EventID {
+			t.Fatal("builder included only part of a source event")
+		}
+	}
+}
