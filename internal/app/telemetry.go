@@ -100,6 +100,7 @@ func (a *App) deliverTelemetry(
 			return fmt.Errorf("read application telemetry spool for %s: %w", application.ApplicationID, err)
 		}
 		for _, record := range applicationRecords {
+			inputCountBefore := len(inputs)
 			source := telemetry.Source{
 				Kind:          "application",
 				ApplicationID: record.ApplicationID,
@@ -150,6 +151,21 @@ func (a *App) deliverTelemetry(
 				}
 				inputs = append(inputs, logInputs...)
 			}
+
+			if len(inputs) == inputCountBefore &&
+				hasCapability(decision.Capabilities, appmonitor.CapabilityApplicationLogs) &&
+				(record.Payload.Logs.Status == appmonitor.StatusAvailable || record.Payload.Logs.Status == appmonitor.StatusUnsupported) {
+				emptyApplicationEvents[record.ApplicationID] = append(
+					emptyApplicationEvents[record.ApplicationID],
+					record.EventID,
+				)
+			}
+		}
+	}
+
+	for applicationID, eventIDs := range emptyApplicationEvents {
+		if err := a.applicationSpool.Acknowledge(applicationID, eventIDs); err != nil {
+			return fmt.Errorf("acknowledge empty application log collection for %s: %w", applicationID, err)
 		}
 	}
 
