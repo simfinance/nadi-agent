@@ -33,7 +33,6 @@ func TestValidateAcceptsHTTPSCentralURL(t *testing.T) {
 	}
 }
 
-
 func TestLoadDisablesLogTelemetryByDefault(t *testing.T) {
 	t.Setenv("NADI_AGENT_LOG_TELEMETRY_ENABLED", "")
 	t.Setenv("NADI_CENTRAL_URL", "https://central.example.test")
