@@ -72,6 +72,10 @@ all sensitive information is always detected.
   only when the exact `application_logs` grant is active and the Agent-local
   opt-in `NADI_AGENT_LOG_TELEMETRY_ENABLED=true` is explicitly configured.
   This opt-in defaults to `false`.
+- Keep that opt-in disabled: the Bridge summary endpoint does not expose a
+  durable cursor, and Agent-side persistent deduplication across polling and
+  restart is not yet implemented. Enabling it before that work is complete
+  could re-submit recent summary entries.
 - The Bridge returns sanitized summary metadata, not raw log messages. The
   Agent derives the Central `message` field from the returned exception type;
   it does not invent raw log contents.
