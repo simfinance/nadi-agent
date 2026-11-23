@@ -130,6 +130,10 @@ func (a *App) deliverTelemetry(
 		inputs,
 	)
 	if err != nil {
+		var statusError *telemetry.HTTPStatusError
+		if errors.As(err, &statusError) && statusError.StatusCode == http.StatusGone {
+			return ErrControlPollRequired
+		}
 		return err
 	}
 	if len(acknowledged) == 0 {
