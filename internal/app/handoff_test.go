@@ -29,6 +29,15 @@ func TestInactiveActivationStatePreservesSuspendedAndRevokedStates(t *testing.T)
 			expected: "revoked",
 		},
 		{
+			name: "monitoring suspended",
+			application: control.Application{
+				RegistrationStatus: "approved",
+				ActivationStatus: "active",
+				MonitoringStatus: "suspended",
+			},
+			expected: "suspended",
+		},
+		{
 			name: "pending approval",
 			application: control.Application{
 				RegistrationStatus: "pending",
