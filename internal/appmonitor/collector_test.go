@@ -154,7 +154,7 @@ func TestCollectDoesNotFollowRedirects(t *testing.T) {
 
 func TestCollectApplicationLogsUsesExistingBridgeSummaryEndpoint(t *testing.T) {
 	requestCount := 0
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		requestCount++
 		if request.URL.Path != "/_nadi/v1/logs/application" {
 			t.Fatalf("unexpected Bridge path %q", request.URL.Path)
@@ -183,6 +183,7 @@ func TestCollectApplicationLogsUsesExistingBridgeSummaryEndpoint(t *testing.T) {
 	defer server.Close()
 
 	collector := NewCollector(time.Second)
+	collector.client = server.Client()
 	snapshot := collector.Collect(
 		context.Background(),
 		server.URL+"/_nadi/v1",
