@@ -873,7 +873,6 @@ func TestBuildPendingNeverCutsOneSpoolEventAtTheRecordLimit(t *testing.T) {
 	}
 }
 
-
 func TestSendRetainsPendingBatchWhenCentralACKIsInvalid(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
