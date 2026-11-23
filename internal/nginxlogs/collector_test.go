@@ -136,7 +136,7 @@ func TestCollectorEnforcesTailByteLimit(t *testing.T) {
 func TestNewCollectorRejectsNonCleanOrRelativePaths(t *testing.T) {
     paths := []string{
         "var/log/nginx/error.log",
-        filepath.Join(string(os.PathSeparator), "var", "log", "..", "log", "nginx", "error.log"),
+        "/var/log/../log/nginx/error.log",
     }
 
     for _, path := range paths {
