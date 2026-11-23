@@ -1,7 +1,6 @@
 package handoffbroker
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
