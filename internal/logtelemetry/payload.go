@@ -234,7 +234,7 @@ func normalizeContext(raw json.RawMessage) (map[string]any, error) {
 				),
 				"Bearer [REDACTED]",
 			)
-		case bool, json.Number, nil:
+		case bool, json.Number:
 			normalized[key] = typed
 		default:
 			return nil, fmt.Errorf("application log context field %q has an unsupported value type", key)
