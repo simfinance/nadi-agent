@@ -43,25 +43,27 @@ func (a *App) deliverTelemetry(
 
 	inputs := make([]telemetry.InputRecord, 0, 500)
 
-	serverRecords, err := a.telemetrySpool.ReadBatch(telemetry.MaximumBatchRecords)
-	if err != nil {
-		return fmt.Errorf("read server telemetry spool: %w", err)
-	}
-	for _, record := range serverRecords {
-		data, err := json.Marshal(record.Payload)
+	if serverMetricsAllowed {
+		serverRecords, err := a.telemetrySpool.ReadBatch(telemetry.MaximumBatchRecords)
 		if err != nil {
-			return fmt.Errorf("encode server metrics snapshot: %w", err)
+			return fmt.Errorf("read server telemetry spool: %w", err)
 		}
-		inputs = append(inputs, telemetry.InputRecord{
-			Stream:      "server_metrics",
-			ObservedAt:  record.Timestamp,
-			CollectedAt: record.Timestamp,
-			Data:        data,
-			Source: telemetry.Source{
-				Kind:    "server",
-				EventID: record.EventID,
-			},
-		})
+		for _, record := range serverRecords {
+			data, err := json.Marshal(record.Payload)
+			if err != nil {
+				return fmt.Errorf("encode server metrics snapshot: %w", err)
+			}
+			inputs = append(inputs, telemetry.InputRecord{
+				Stream:      "server_metrics",
+				ObservedAt:  record.Timestamp,
+				CollectedAt: record.Timestamp,
+				Data:        data,
+				Source: telemetry.Source{
+					Kind:    "server",
+					EventID: record.EventID,
+				},
+			})
+		}
 	}
 
 	for _, application := range agentState.Applications {
