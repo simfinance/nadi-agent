@@ -93,7 +93,7 @@ func LoadConfig(path string) (Config, error) {
     }
 
     stat, ok := metadata.Sys().(*syscall.Stat_t)
-    if !ok || stat.Uid != 0 || metadata.Mode().Perm()&0022 != 0 || metadata.Size() > MaximumRequestBytes {
+    if !ok || stat.Uid != 0 || stat.Gid != 0 || metadata.Mode().Perm() != 0600 || metadata.Size() > MaximumRequestBytes {
         return Config{}, errors.New("broker mapping file ownership, permissions, or size are invalid")
     }
 
@@ -110,7 +110,7 @@ func LoadConfig(path string) (Config, error) {
     }
 
     openedStat, ok := openedMetadata.Sys().(*syscall.Stat_t)
-    if !ok || openedStat.Uid != 0 || openedMetadata.Mode().Perm()&0022 != 0 {
+    if !ok || openedStat.Uid != 0 || openedStat.Gid != 0 || openedMetadata.Mode().Perm() != 0600 {
         return Config{}, errors.New("opened broker mapping file ownership or permissions are invalid")
     }
 
@@ -143,8 +143,8 @@ func LoadConfig(path string) (Config, error) {
 }
 
 func NewServer(socketPath string, config Config) (*Server, error) {
-    if !filepath.IsAbs(socketPath) {
-        return nil, errors.New("broker socket path must be absolute")
+    if socketPath != "/run/nadi-agent/credential-handoff.sock" {
+        return nil, errors.New("broker socket path must use the fixed NADI handoff location")
     }
 
     if err := validateConfig(config); err != nil {
@@ -386,6 +386,10 @@ func validateActivationRequest(request Request, now time.Time) error {
         }
     } else if request.MonitoringEnabled || request.GrantAcknowledged || len(request.Capabilities) != 0 {
         return errors.New("inactive assertion must not grant monitoring capabilities")
+    }
+
+    if request.Capabilities == nil {
+        return errors.New("capabilities must be an explicit JSON array")
     }
 
     seen := make(map[string]struct{}, len(request.Capabilities))
@@ -709,6 +713,8 @@ func validateConfig(config Config) error {
 
     seenIDs := make(map[string]struct{}, len(config.Applications))
     seenKeys := make(map[string]struct{}, len(config.Applications))
+    seenCredentialPaths := make(map[string]struct{}, len(config.Applications))
+    seenActivationPaths := make(map[string]struct{}, len(config.Applications))
 
     for _, mapping := range config.Applications {
         if mapping.ApplicationID == "" || mapping.ApplicationKey == "" {
@@ -738,6 +744,10 @@ func validateConfig(config Config) error {
         basePath := filepath.Clean(mapping.BasePath)
         credentialPath := filepath.Clean(mapping.CredentialFile)
         activationPath := filepath.Clean(mapping.ActivationStateFile)
+
+        if basePath != mapping.BasePath || credentialPath != mapping.CredentialFile || activationPath != mapping.ActivationStateFile {
+            return errors.New("application mapping paths must already be canonical")
+        }
 
         if !strings.HasPrefix(credentialPath, basePath+string(os.PathSeparator)) {
             return errors.New("credential destination must be inside the canonical application base path")
