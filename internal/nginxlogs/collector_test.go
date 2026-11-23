@@ -237,3 +237,105 @@ func TestParseLineMapsAllCentralSeverityNames(t *testing.T) {
 		}
 	}
 }
+
+
+func TestDurableCollectorReadsEntriesAcrossRestartWithoutSkipping(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "error.log")
+	statePath := filepath.Join(directory, "cursor.json")
+	lines := strings.Join([]string{
+		"2026/11/23 08:00:00 [error] 123#123: first failure",
+		"2026/11/23 08:00:01 [warn] 123#123: second warning",
+		"2026/11/23 08:00:02 [crit] 123#123: third failure",
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(lines), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	collector, err := NewDurableCollector(path, statePath, DefaultMaximumBytes, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for index, expected := range []string{"first failure", "second warning", "third failure"} {
+		snapshot, cursor, err := collector.CollectWithCursor(time.Now().UTC())
+		if err != nil {
+			t.Fatalf("collect entry %d: %v", index, err)
+		}
+		if len(snapshot.Entries) != 1 || snapshot.Entries[0].Message != expected {
+			t.Fatalf("entry %d = %#v, want message %q", index, snapshot.Entries, expected)
+		}
+		if err := collector.Commit(cursor); err != nil {
+			t.Fatalf("commit cursor %d: %v", index, err)
+		}
+
+		collector, err = NewDurableCollector(path, statePath, DefaultMaximumBytes, 1)
+		if err != nil {
+			t.Fatalf("reopen collector %d: %v", index, err)
+		}
+	}
+}
+
+func TestDurableCollectorDoesNotAdvanceBeforeCommit(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "error.log")
+	statePath := filepath.Join(directory, "cursor.json")
+	line := "2026/11/23 08:00:00 [error] 123#123: pending failure\n"
+	if err := os.WriteFile(path, []byte(line), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	collector, err := NewDurableCollector(path, statePath, DefaultMaximumBytes, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first, _, err := collector.CollectWithCursor(time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := collector.CollectWithCursor(time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Entries) != 1 || len(second.Entries) != 1 {
+		t.Fatal("uncommitted cursor must return the same pending log entry")
+	}
+}
+
+func TestDurableCollectorFailsClosedWhenFileRotatesWithUnreadBytes(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "error.log")
+	statePath := filepath.Join(directory, "cursor.json")
+	original := strings.Join([]string{
+		"2026/11/23 08:00:00 [error] 123#123: first failure",
+		"2026/11/23 08:00:01 [error] 123#123: second failure",
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(original), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	collector, err := NewDurableCollector(path, statePath, DefaultMaximumBytes, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, cursor, err := collector.CollectWithCursor(time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := collector.Commit(cursor); err != nil {
+		t.Fatal(err)
+	}
+
+	rotated := filepath.Join(directory, "error.log.1")
+	if err := os.Rename(path, rotated); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("2026/11/23 08:00:02 [error] 123#123: new file\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := collector.CollectWithCursor(time.Now().UTC()); err == nil {
+		t.Fatal("expected rotation with unread bytes to fail closed")
+	}
+}
