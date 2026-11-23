@@ -158,6 +158,22 @@ func TestFingerprintRedactsIPv6AddressesButPreservesHexWords(t *testing.T) {
 	}
 }
 
+func TestFingerprintRedactsQuotedRequestsCredentialsAndCookies(t *testing.T) {
+	first, ok := parseLine("2026/11/23 08:00:00 [error] 123#123: request: \"GET /?token=first HTTP/1.1\", Authorization: Bearer secret-one, Cookie: session=alpha; csrf=one")
+	if !ok {
+		t.Fatal("expected first Nginx error line to parse")
+	}
+
+	second, ok := parseLine("2026/11/23 08:00:00 [error] 123#123: request: \"POST /private?token=second HTTP/1.1\", Authorization: Bearer secret-two, Cookie: session=beta; csrf=two")
+	if !ok {
+		t.Fatal("expected second Nginx error line to parse")
+	}
+
+	if first.Fingerprint != second.Fingerprint {
+		t.Fatal("expected request details, credentials, and cookies to be removed from fingerprints")
+	}
+}
+
 func TestNewCollectorRejectsNonCleanOrRelativePaths(t *testing.T) {
 	paths := []string{
 		"var/log/nginx/error.log",
