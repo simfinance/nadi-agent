@@ -13,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -440,8 +441,8 @@ func validateMonotonicObservation(previous string, next string) error {
 		return errors.New("new activation observation timestamp is invalid")
 	}
 
-	if nextTime.Before(previousTime) {
-		return errors.New("activation assertion update is older than the existing assertion")
+	if !nextTime.After(previousTime) {
+		return errors.New("activation assertion update is not newer than the existing assertion")
 	}
 
 	return nil
@@ -652,6 +653,10 @@ func readBoundedLine(connection net.Conn, maximum int64) ([]byte, error) {
 }
 
 func decodeRequest(content []byte) (Request, error) {
+	if !utf8.Valid(content) {
+		return Request{}, errors.New("request must be valid UTF-8")
+	}
+
 	if err := rejectDuplicateJSONKeys(content); err != nil {
 		return Request{}, err
 	}
