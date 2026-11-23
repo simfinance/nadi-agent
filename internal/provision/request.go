@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -47,7 +48,12 @@ type provisionEnrollmentManifest struct {
 }
 
 type provisionManifestApplication struct {
-	ApplicationKey string `json:"application_key"`
+	ApplicationKey   string `json:"application_key"`
+	ApplicationName  string `json:"application_name"`
+	Environment      string `json:"environment"`
+	FrameworkVersion string `json:"framework_version,omitempty"`
+	PHPVersion       string `json:"php_version,omitempty"`
+	BaseURL          string `json:"base_url"`
 }
 
 func DecodeProvisionRequest(reader io.Reader) (ProvisionRequest, []byte, []byte, error) {
@@ -152,8 +158,20 @@ func validateProvisionRequest(request ProvisionRequest) ([]byte, []byte, error) 
 
 	manifestKeys := make(map[string]struct{}, len(manifest.Applications))
 	for _, application := range manifest.Applications {
-		if application.ApplicationKey == "" {
-			return nil, nil, errors.New("enrollment manifest contains an empty application key")
+		if application.ApplicationKey == "" ||
+			strings.TrimSpace(application.ApplicationName) == "" ||
+			strings.TrimSpace(application.Environment) == "" ||
+			len(application.ApplicationKey) > 100 ||
+			len(application.ApplicationName) > 255 ||
+			len(application.Environment) > 50 ||
+			len(application.FrameworkVersion) > 50 ||
+			len(application.PHPVersion) > 30 {
+			return nil, nil, errors.New("enrollment manifest contains invalid application identity fields")
+		}
+
+		applicationURL, urlErr := url.ParseRequestURI(application.BaseURL)
+		if urlErr != nil || applicationURL.Scheme != "https" || applicationURL.Host == "" {
+			return nil, nil, errors.New("enrollment manifest application base_url must be an absolute HTTPS URL")
 		}
 
 		if _, exists := manifestKeys[application.ApplicationKey]; exists {
