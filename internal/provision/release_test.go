@@ -21,12 +21,12 @@ func TestTrustedReleasePublicKeyFingerprint(t *testing.T) {
 
 func TestValidateReleaseManifestAcceptsSupportedManifest(t *testing.T) {
 	manifest := ReleaseManifest{
-		SchemaVersion:  1,
-		Product:        "nadi-agent",
-		KeyID:          trustedReleaseKeyID,
-		Version:        "0.7.0",
+		SchemaVersion:   1,
+		Product:         "nadi-agent",
+		KeyID:           trustedReleaseKeyID,
+		Version:         "0.7.0",
 		ProtocolVersion: 1,
-		ReleasedAt:     "2026-11-23T00:00:00Z",
+		ReleasedAt:      "2026-11-23T00:00:00Z",
 		Artifacts: []ReleaseArtifact{
 			{
 				OS:           "linux",
@@ -61,12 +61,12 @@ func TestValidateReleaseManifestAcceptsSupportedManifest(t *testing.T) {
 
 func TestValidateReleaseManifestRejectsWrongKeyID(t *testing.T) {
 	manifest := ReleaseManifest{
-		SchemaVersion:  1,
-		Product:        "nadi-agent",
-		KeyID:          "untrusted-key",
-		Version:        "0.7.0",
+		SchemaVersion:   1,
+		Product:         "nadi-agent",
+		KeyID:           "untrusted-key",
+		Version:         "0.7.0",
 		ProtocolVersion: 1,
-		ReleasedAt:     "2026-11-23T00:00:00Z",
+		ReleasedAt:      "2026-11-23T00:00:00Z",
 		Artifacts: []ReleaseArtifact{
 			{
 				OS:           "linux",

@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/x509"
+	_ "embed"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -17,12 +18,11 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	_ "embed"
 )
 
 const (
-	maximumManifestBytes = 1 << 20
-	trustedReleaseKeyID = "nadi-agent-release-2026-01"
+	maximumManifestBytes         = 1 << 20
+	trustedReleaseKeyID          = "nadi-agent-release-2026-01"
 	trustedReleaseKeyFingerprint = "91d063a323ffb7feaad3e4bf39d750ec339b2206b74f762d11e1f291267a49e1"
 )
 
@@ -30,28 +30,28 @@ const (
 var releasePublicKeyPEM []byte
 
 type ReleaseManifest struct {
-	SchemaVersion int               `json:"schema_version"`
-	Product string                  `json:"product"`
-	KeyID string                    `json:"key_id"`
-	Version string                  `json:"version"`
-	ProtocolVersion int             `json:"protocol_version"`
-	ReleasedAt string               `json:"released_at"`
-	Artifacts []ReleaseArtifact      `json:"artifacts"`
+	SchemaVersion   int               `json:"schema_version"`
+	Product         string            `json:"product"`
+	KeyID           string            `json:"key_id"`
+	Version         string            `json:"version"`
+	ProtocolVersion int               `json:"protocol_version"`
+	ReleasedAt      string            `json:"released_at"`
+	Artifacts       []ReleaseArtifact `json:"artifacts"`
 }
 
 type ReleaseArtifact struct {
-	OS string           `json:"os"`
+	OS           string `json:"os"`
 	Architecture string `json:"architecture"`
-	Filename string     `json:"filename"`
-	URL string          `json:"url"`
-	SHA256 string       `json:"sha256"`
+	Filename     string `json:"filename"`
+	URL          string `json:"url"`
+	SHA256       string `json:"sha256"`
 }
 
 var (
 	platformValuePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
-	filenamePattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
-	versionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
-	digestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
+	filenamePattern      = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+	versionPattern       = regexp.MustCompile(`^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
+	digestPattern        = regexp.MustCompile(`^[a-f0-9]{64}$`)
 )
 
 func VerifySignedRelease(manifestJSON []byte, signatureBase64 string) (ReleaseManifest, error) {
