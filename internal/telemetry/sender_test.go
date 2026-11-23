@@ -734,3 +734,87 @@ func TestSplitDoesNotAcknowledgeSharedSpoolEventBeforeAllChildBatches(t *testing
 		t.Fatalf("complete final split child: %v", err)
 	}
 }
+
+
+func TestDiscardPendingQuarantinesEverySplitChildDurably(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusRequestEntityTooLarge)
+	}))
+	defer server.Close()
+
+	directory := t.TempDir()
+	sender, err := NewSender(server.URL, directory, time.Second)
+	if err != nil {
+		t.Fatalf("create sender: %v", err)
+	}
+	sender.client = server.Client()
+
+	applicationID := "11111111-1111-4111-8111-111111111111"
+	inputs := []InputRecord{
+		{
+			Stream:        "application_metrics",
+			ApplicationID: &applicationID,
+			Data:          json.RawMessage(`{"metric":1}`),
+			Source: Source{
+				Kind:          "application",
+				ApplicationID: applicationID,
+				EventID:       "discard-event-1",
+			},
+		},
+		{
+			Stream:        "application_metrics",
+			ApplicationID: &applicationID,
+			Data:          json.RawMessage(`{"metric":2}`),
+			Source: Source{
+				Kind:          "application",
+				ApplicationID: applicationID,
+				EventID:       "discard-event-2",
+			},
+		},
+	}
+
+	if _, err := sender.Send(context.Background(), "agent-1", "22222222-2222-4222-8222-222222222222", "credential", inputs); err != nil {
+		t.Fatalf("split batch before discard: %v", err)
+	}
+	if err := sender.DiscardPending(); err != nil {
+		t.Fatalf("quarantine pending split children: %v", err)
+	}
+
+	if _, hasPending, err := sender.PendingSources(); err != nil {
+		t.Fatalf("inspect discarded pending batch: %v", err)
+	} else if hasPending {
+		t.Fatal("pending split queue remains after durable quarantine")
+	}
+
+	file, err := os.Open(filepath.Join(directory, "quarantine.ndjson"))
+	if err != nil {
+		t.Fatalf("open quarantine file: %v", err)
+	}
+	defer file.Close()
+
+	var entries []QuarantineEntry
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		var entry QuarantineEntry
+		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+			t.Fatalf("decode quarantine entry: %v", err)
+		}
+		entries = append(entries, entry)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("read quarantine entries: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected both split children in quarantine, got %d entries", len(entries))
+	}
+
+	eventIDs := map[string]bool{}
+	for _, entry := range entries {
+		for _, source := range entry.Pending.Sources {
+			eventIDs[source.EventID] = true
+		}
+	}
+	if !eventIDs["discard-event-1"] || !eventIDs["discard-event-2"] {
+		t.Fatalf("quarantine did not preserve all source events: %#v", eventIDs)
+	}
+}
