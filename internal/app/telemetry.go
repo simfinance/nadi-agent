@@ -73,24 +73,48 @@ func (a *App) deliverTelemetry(
 		if err != nil {
 			return fmt.Errorf("read application telemetry spool for %s: %w", application.ApplicationID, err)
 		}
+		decision := decisions[application.ApplicationID]
 		for _, record := range applicationRecords {
-			data, err := json.Marshal(record.Payload)
-			if err != nil {
-				return fmt.Errorf("encode application metrics snapshot: %w", err)
+			source := telemetry.Source{
+				Kind:          "application",
+				ApplicationID: record.ApplicationID,
+				EventID:       record.EventID,
 			}
 			applicationID := record.ApplicationID
-			inputs = append(inputs, telemetry.InputRecord{
-				Stream:        "application_metrics",
-				ObservedAt:    record.Timestamp,
-				CollectedAt:   record.Timestamp,
-				ApplicationID: &applicationID,
-				Data:          data,
-				Source: telemetry.Source{
-					Kind:          "application",
-					ApplicationID: record.ApplicationID,
-					EventID:       record.EventID,
-				},
-			})
+
+			if hasCapability(decision.Capabilities, "application_metrics") {
+				data, err := json.Marshal(map[string]any{
+					"timestamp": record.Timestamp,
+					"health":    record.Payload.Health,
+					"info":      record.Payload.Info,
+					"metrics":   record.Payload.Metrics,
+				})
+				if err != nil {
+					return fmt.Errorf("encode application metrics snapshot: %w", err)
+				}
+
+				inputs = append(inputs, telemetry.InputRecord{
+					Stream:        "application_metrics",
+					ObservedAt:    record.Timestamp,
+					CollectedAt:   record.Timestamp,
+					ApplicationID: &applicationID,
+					Data:          data,
+					Source:        source,
+				})
+			}
+
+			if hasCapability(decision.Capabilities, "database_monitoring") &&
+				(record.Payload.Database.Status == "available" || record.Payload.Database.Status == "degraded") &&
+				len(record.Payload.Database.Data) > 0 {
+				inputs = append(inputs, telemetry.InputRecord{
+					Stream:        "database_metrics",
+					ObservedAt:    record.Timestamp,
+					CollectedAt:   record.Timestamp,
+					ApplicationID: &applicationID,
+					Data:          append(json.RawMessage(nil), record.Payload.Database.Data...),
+					Source:        source,
+				})
+			}
 		}
 	}
 
