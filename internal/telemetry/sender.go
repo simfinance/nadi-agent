@@ -64,10 +64,11 @@ type InputRecord struct {
 }
 
 type Source struct {
-	Kind          string `json:"kind"`
-	ApplicationID string `json:"application_id,omitempty"`
-	EventID       string `json:"event_id"`
-	Quarantined   bool   `json:"quarantined,omitempty"`
+	Kind             string `json:"kind"`
+	ApplicationID    string `json:"application_id,omitempty"`
+	EventID          string `json:"event_id"`
+	Quarantined      bool   `json:"quarantined,omitempty"`
+	QuarantineStatus int    `json:"quarantine_status,omitempty"`
 }
 
 type Record struct {
@@ -209,7 +210,7 @@ func (s *Sender) Send(ctx context.Context, agentID string, instanceID string, cr
 			if err := s.quarantinePending(http.StatusRequestEntityTooLarge, "single telemetry record exceeds 64 KiB"); err != nil {
 				return nil, fmt.Errorf("quarantine oversized telemetry record: %w", err)
 			}
-			return markQuarantined(pending.Sources), nil
+			return markQuarantined(pending.Sources, http.StatusRequestEntityTooLarge), nil
 		}
 	}
 
@@ -222,7 +223,7 @@ func (s *Sender) Send(ctx context.Context, agentID string, instanceID string, cr
 			if err := s.quarantinePending(http.StatusRequestEntityTooLarge, "single telemetry record exceeds 1 MiB"); err != nil {
 				return nil, fmt.Errorf("quarantine oversized telemetry record: %w", err)
 			}
-			return markQuarantined(pending.Sources), nil
+			return markQuarantined(pending.Sources, response.StatusCode), nil
 		}
 		if err := s.splitPending(*pending); err != nil {
 			return nil, fmt.Errorf("persist split telemetry batches: %w", err)
@@ -571,10 +572,11 @@ func (s *Sender) quarantinePending(statusCode int, reason string) error {
 	return nil
 }
 
-func markQuarantined(sources []Source) []Source {
+func markQuarantined(sources []Source, statusCode int) []Source {
 	result := append([]Source(nil), sources...)
 	for index := range result {
 		result[index].Quarantined = true
+		result[index].QuarantineStatus = statusCode
 	}
 	return result
 }
