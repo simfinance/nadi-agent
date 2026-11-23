@@ -11,32 +11,32 @@ import (
 )
 
 type Config struct {
-	CentralURL              string
-	AgentToken              string
-	EnrollmentToken         string
-	LogLevel                string
-	PollInterval            time.Duration
-	HTTPTimeout             time.Duration
-	StateDir                string
-	ActivationPublicKeyPath string
-	ActivationKeyID         string
-	LogTelemetryEnabled     bool
+	CentralURL                string
+	AgentToken                string
+	EnrollmentToken           string
+	LogLevel                  string
+	PollInterval              time.Duration
+	HTTPTimeout               time.Duration
+	StateDir                  string
+	ActivationPublicKeyPath   string
+	ActivationKeyID           string
+	LogTelemetryEnabled       bool
 	SystemLogTelemetryEnabled bool
 	NginxErrorLogPath         string
 }
 
 func Load() (Config, error) {
 	cfg := Config{
-		CentralURL:              strings.TrimRight(envOrDefault("NADI_CENTRAL_URL", "https://nadi.pesantrenalirsyad.org"), "/"),
-		AgentToken:              strings.TrimSpace(os.Getenv("NADI_AGENT_TOKEN")),
-		EnrollmentToken:         strings.TrimSpace(os.Getenv("NADI_ENROLLMENT_TOKEN")),
-		LogLevel:                strings.ToLower(envOrDefault("NADI_LOG_LEVEL", "info")),
-		PollInterval:            30 * time.Second,
-		HTTPTimeout:             10 * time.Second,
-		StateDir:                envOrDefault("NADI_STATE_DIR", "/var/lib/nadi-agent"),
-		ActivationPublicKeyPath: envOrDefault("NADI_ACTIVATION_PUBLIC_KEY", "/etc/nadi-agent/keys/activation-public.pem"),
-		ActivationKeyID:         envOrDefault("NADI_ACTIVATION_KEY_ID", "nadi-central-2026-01"),
-		LogTelemetryEnabled:     false,
+		CentralURL:                strings.TrimRight(envOrDefault("NADI_CENTRAL_URL", "https://nadi.pesantrenalirsyad.org"), "/"),
+		AgentToken:                strings.TrimSpace(os.Getenv("NADI_AGENT_TOKEN")),
+		EnrollmentToken:           strings.TrimSpace(os.Getenv("NADI_ENROLLMENT_TOKEN")),
+		LogLevel:                  strings.ToLower(envOrDefault("NADI_LOG_LEVEL", "info")),
+		PollInterval:              30 * time.Second,
+		HTTPTimeout:               10 * time.Second,
+		StateDir:                  envOrDefault("NADI_STATE_DIR", "/var/lib/nadi-agent"),
+		ActivationPublicKeyPath:   envOrDefault("NADI_ACTIVATION_PUBLIC_KEY", "/etc/nadi-agent/keys/activation-public.pem"),
+		ActivationKeyID:           envOrDefault("NADI_ACTIVATION_KEY_ID", "nadi-central-2026-01"),
+		LogTelemetryEnabled:       false,
 		SystemLogTelemetryEnabled: false,
 		NginxErrorLogPath:         strings.TrimSpace(os.Getenv("NADI_AGENT_NGINX_ERROR_LOG_PATH")),
 	}
