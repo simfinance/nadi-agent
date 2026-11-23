@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -522,5 +523,132 @@ func TestBuildPendingRespectsOneMiBBatchLimit(t *testing.T) {
 	}
 	if len(pending.Batch.Records) >= MaximumBatchRecords {
 		t.Fatal("expected byte limit to stop the batch before the 500-record limit")
+	}
+}
+
+
+func TestSendRetries429AndHonorsRetryAfter(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requestCount++
+		var batch Batch
+		if err := json.NewDecoder(request.Body).Decode(&batch); err != nil {
+			t.Fatalf("decode batch: %v", err)
+		}
+		if requestCount == 1 {
+			writer.Header().Set("Retry-After", "1")
+			writer.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(
+			writer,
+			`{"success":true,"data":{"success":true,"batch_id":"%s","status":"accepted","record_count":1,"accepted_count":1,"duplicate_count":0,"rejected_count":0,"replayed":false}}`,
+			batch.BatchID,
+		)
+	}))
+	defer server.Close()
+
+	sender, err := NewSender(server.URL, t.TempDir(), time.Second)
+	if err != nil {
+		t.Fatalf("create sender: %v", err)
+	}
+	sender.client = server.Client()
+
+	applicationID := "11111111-1111-4111-8111-111111111111"
+	sources, err := sender.Send(context.Background(), "agent-1", "22222222-2222-4222-8222-222222222222", "credential", []InputRecord{{
+		Stream:        "application_metrics",
+		ApplicationID: &applicationID,
+		Data:          json.RawMessage(`{}`),
+		Source: Source{
+			Kind:          "application",
+			ApplicationID: applicationID,
+			EventID:       "retry-429",
+		},
+	}})
+	if err != nil {
+		t.Fatalf("send after HTTP 429: %v", err)
+	}
+	if requestCount != 2 || len(sources) != 1 {
+		t.Fatalf("expected one bounded retry and one acknowledgement, requests=%d sources=%d", requestCount, len(sources))
+	}
+}
+
+func TestSendBounds503RetriesAndRetainsPendingBatch(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requestCount++
+		writer.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	directory := t.TempDir()
+	sender, err := NewSender(server.URL, directory, time.Second)
+	if err != nil {
+		t.Fatalf("create sender: %v", err)
+	}
+	sender.client = server.Client()
+
+	applicationID := "11111111-1111-4111-8111-111111111111"
+	_, err = sender.Send(context.Background(), "agent-1", "22222222-2222-4222-8222-222222222222", "credential", []InputRecord{{
+		Stream:        "application_metrics",
+		ApplicationID: &applicationID,
+		Data:          json.RawMessage(`{}`),
+		Source: Source{
+			Kind:          "application",
+			ApplicationID: applicationID,
+			EventID:       "retry-503",
+		},
+	}})
+	var statusError *HTTPStatusError
+	if !errors.As(err, &statusError) || statusError.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected bounded HTTP 503 error, got %v", err)
+	}
+	if requestCount != 4 {
+		t.Fatalf("expected four bounded attempts, got %d", requestCount)
+	}
+	if _, err := os.Stat(filepath.Join(directory, "pending-batch.json")); err != nil {
+		t.Fatalf("pending batch was not retained after HTTP 503: %v", err)
+	}
+}
+
+func TestSendQuarantinesSingleOversizedRecordWithoutRetry(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requestCount++
+		writer.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	directory := t.TempDir()
+	sender, err := NewSender(server.URL, directory, time.Second)
+	if err != nil {
+		t.Fatalf("create sender: %v", err)
+	}
+	sender.client = server.Client()
+
+	applicationID := "11111111-1111-4111-8111-111111111111"
+	data := json.RawMessage(`{"message":"` + strings.Repeat("x", MaximumRecordBytes) + `"}`)
+	sources, err := sender.Send(context.Background(), "agent-1", "22222222-2222-4222-8222-222222222222", "credential", []InputRecord{{
+		Stream:        "application_logs",
+		ApplicationID: &applicationID,
+		Data:          data,
+		Source: Source{
+			Kind:          "application",
+			ApplicationID: applicationID,
+			EventID:       "oversized-log",
+		},
+	}})
+	if err != nil {
+		t.Fatalf("quarantine oversized record: %v", err)
+	}
+	if requestCount != 0 {
+		t.Fatalf("oversized record should not be sent to Central, got %d requests", requestCount)
+	}
+	if len(sources) != 1 || !sources[0].Quarantined || sources[0].QuarantineStatus != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized record was not quarantined with HTTP 413 disposition: %#v", sources)
+	}
+	if _, err := os.Stat(filepath.Join(directory, "quarantine.ndjson")); err != nil {
+		t.Fatalf("oversized record quarantine was not durable: %v", err)
 	}
 }
