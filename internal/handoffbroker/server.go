@@ -1,6 +1,7 @@
 package handoffbroker
 
 import (
+    "bufio"
     "bytes"
     "encoding/json"
     "errors"
@@ -9,7 +10,6 @@ import (
     "net"
     "os"
     "path/filepath"
-    "sort"
     "strings"
     "syscall"
     "time"
@@ -311,7 +311,7 @@ func (s *Server) process(request Request) Response {
             return response
         }
 
-        if err := ensureRootOwnedDirectory(filepath.Dir(mapping.ActivationStateFile)); err != nil {
+        if err := ensureBridgeStateDirectory(); err != nil {
             response.ErrorCode = "activation_state_directory_invalid"
             return response
         }
@@ -475,6 +475,29 @@ func ensureNoSymlinkPath(path string) error {
     }
 
     return nil
+}
+
+
+func ensureBridgeStateDirectory() error {
+    parent := "/run/nadi-agent"
+    if err := ensureRootOwnedDirectory(parent); err != nil {
+        return err
+    }
+
+    directory := filepath.Join(parent, "bridge-state")
+    if err := os.Mkdir(directory, 0711); err != nil && !errors.Is(err, os.ErrExist) {
+        return fmt.Errorf("create Bridge activation state directory: %w", err)
+    }
+
+    if err := os.Chown(directory, 0, 0); err != nil {
+        return fmt.Errorf("set Bridge activation state directory ownership: %w", err)
+    }
+
+    if err := os.Chmod(directory, 0711); err != nil {
+        return fmt.Errorf("secure Bridge activation state directory: %w", err)
+    }
+
+    return ensureRootOwnedDirectory(directory)
 }
 
 func ensureRootOwnedDirectory(path string) error {
@@ -690,7 +713,6 @@ func validateConfig(config Config) error {
         }
     }
 
-    sort.Strings([]string{})
     return nil
 }
 
