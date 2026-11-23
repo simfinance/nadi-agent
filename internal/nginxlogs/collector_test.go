@@ -133,6 +133,31 @@ func TestCollectorEnforcesTailByteLimit(t *testing.T) {
 	}
 }
 
+func TestFingerprintRedactsIPv6AddressesButPreservesHexWords(t *testing.T) {
+	first, ok := parseLine("2026/11/23 08:00:00 [error] 123#123: client 2001:db8::1 returned bad gateway")
+	if !ok {
+		t.Fatal("expected first Nginx error line to parse")
+	}
+
+	second, ok := parseLine("2026/11/23 08:00:00 [error] 123#123: client 2001:db8::2 returned bad gateway")
+	if !ok {
+		t.Fatal("expected second Nginx error line to parse")
+	}
+
+	if first.Fingerprint != second.Fingerprint {
+		t.Fatal("expected IPv6 address changes to be removed from the fingerprint")
+	}
+
+	third, ok := parseLine("2026/11/23 08:00:00 [error] 123#123: client 2001:db8::2 returned error gateway")
+	if !ok {
+		t.Fatal("expected third Nginx error line to parse")
+	}
+
+	if second.Fingerprint == third.Fingerprint {
+		t.Fatal("expected ordinary message words to remain part of the fingerprint")
+	}
+}
+
 func TestNewCollectorRejectsNonCleanOrRelativePaths(t *testing.T) {
 	paths := []string{
 		"var/log/nginx/error.log",
