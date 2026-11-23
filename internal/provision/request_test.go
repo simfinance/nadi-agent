@@ -11,8 +11,8 @@ import (
 func TestDecodeProvisionRequestAcceptsMultipleApplications(t *testing.T) {
 	enrollmentManifest, err := json.Marshal(provisionEnrollmentManifest{
 		Applications: []provisionManifestApplication{
-			{ApplicationKey: "application-one"},
-			{ApplicationKey: "application-two"},
+			{ApplicationKey: "application-one", ApplicationName: "Application One", Environment: "production", BaseURL: "https://one.example.test"},
+			{ApplicationKey: "application-two", ApplicationName: "Application Two", Environment: "staging", BaseURL: "https://two.example.test"},
 		},
 	})
 	if err != nil {
@@ -118,8 +118,8 @@ func validProvisionRequest(t *testing.T) ProvisionRequest {
 
 	enrollmentManifest := provisionEnrollmentManifest{
 		Applications: []provisionManifestApplication{
-			{ApplicationKey: "application-one"},
-			{ApplicationKey: "application-two"},
+			{ApplicationKey: "application-one", ApplicationName: "Application One", Environment: "production", BaseURL: "https://one.example.test"},
+			{ApplicationKey: "application-two", ApplicationName: "Application Two", Environment: "staging", BaseURL: "https://two.example.test"},
 		},
 	}
 
