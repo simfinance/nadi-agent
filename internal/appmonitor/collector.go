@@ -15,6 +15,7 @@ import (
 
 const (
 	CapabilityApplicationMetrics  = "application_metrics"
+	CapabilityApplicationLogs     = "application_logs"
 	CapabilityDatabaseMonitoring  = "database_monitoring"
 	CapabilityQueueMonitoring     = "queue_monitoring"
 	CapabilitySchedulerMonitoring = "scheduler_monitoring"
@@ -63,6 +64,7 @@ type Snapshot struct {
 	Info      EndpointResult `json:"info"`
 	Metrics   EndpointResult `json:"metrics"`
 	Database  EndpointResult `json:"database"`
+	Logs      EndpointResult `json:"logs"`
 	Queue     EndpointResult `json:"queue"`
 	Scheduler EndpointResult `json:"scheduler"`
 }
@@ -105,6 +107,7 @@ func (c *Collector) Collect(
 		Info:      notEnabled(now),
 		Metrics:   notEnabled(now),
 		Database:  notEnabled(now),
+		Logs:      notEnabled(now),
 		Queue:     notEnabled(now),
 		Scheduler: notEnabled(now),
 	}
@@ -116,6 +119,7 @@ func (c *Collector) Collect(
 	}
 
 	if !hasCapability(capabilities, CapabilityApplicationMetrics) &&
+		!hasCapability(capabilities, CapabilityApplicationLogs) &&
 		!hasCapability(capabilities, CapabilityDatabaseMonitoring) &&
 		!hasCapability(capabilities, CapabilityQueueMonitoring) &&
 		!hasCapability(capabilities, CapabilitySchedulerMonitoring) {
@@ -132,6 +136,9 @@ func (c *Collector) Collect(
 		if hasCapability(capabilities, CapabilityDatabaseMonitoring) {
 			snapshot.Database = failure
 		}
+		if hasCapability(capabilities, CapabilityApplicationLogs) {
+			snapshot.Logs = failure
+		}
 		return snapshot
 	}
 
@@ -145,6 +152,9 @@ func (c *Collector) Collect(
 		if hasCapability(capabilities, CapabilityDatabaseMonitoring) {
 			snapshot.Database = failure
 		}
+		if hasCapability(capabilities, CapabilityApplicationLogs) {
+			snapshot.Logs = failure
+		}
 		return snapshot
 	}
 
@@ -155,6 +165,9 @@ func (c *Collector) Collect(
 	}
 	if hasCapability(capabilities, CapabilityDatabaseMonitoring) {
 		snapshot.Database = c.get(ctx, baseURL, credential, "database", now)
+	}
+	if hasCapability(capabilities, CapabilityApplicationLogs) {
+		snapshot.Logs = c.get(ctx, baseURL, credential, "logs/application", now)
 	}
 	return snapshot
 }
@@ -232,6 +245,15 @@ func (c *Collector) get(
 		result.Status = StatusAvailable
 		return result
 	}
+	if response.StatusCode == http.StatusNotImplemented {
+		result.Status = StatusUnsupported
+		if envelope.Error.Code != "" {
+			result.ErrorCode = envelope.Error.Code
+		} else {
+			result.ErrorCode = "bridge_endpoint_returns_501"
+		}
+		return result
+	}
 
 	if response.StatusCode == http.StatusServiceUnavailable && endpoint == "database" && len(envelope.Data) > 0 {
 		result.Status = StatusDegraded
@@ -266,7 +288,8 @@ func endpointURL(baseURL string, endpoint string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if endpoint == "" || strings.Contains(endpoint, "/") || endpoint == "." || endpoint == ".." {
+	if endpoint == "" || endpoint == "." || endpoint == ".." ||
+		(strings.Contains(endpoint, "/") && endpoint != "logs/application") {
 		return "", errors.New("invalid Bridge endpoint")
 	}
 	basePath := strings.TrimRight(parsed.Path, "/")
