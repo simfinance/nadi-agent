@@ -1,9 +1,10 @@
 # NADI Central v1.1 Log Telemetry Contract
 
-Status: Agent-side schema normalization and Nginx collector output are implemented
-in this branch. Runtime log delivery is not enabled or wired. Central log
-ingestion must remain disabled until the Central deployment gate is explicitly
-completed by its operator.
+Status: Agent-side schema normalization, application summary deduplication,
+and opt-in Nginx runtime collection/delivery are implemented in this branch.
+Both Agent log opt-ins default to false. Central log ingestion must remain
+disabled until the Central deployment gate is explicitly completed by its
+operator.
 
 ## Capability and scope
 
@@ -64,18 +65,28 @@ all sensitive information is always detected.
 
 ## Collection and delivery boundaries
 
-- The Nginx collector is still not wired into the Agent runtime or
-  telemetry spool. Its output schema is prepared, but this branch does not
-  start Nginx log collection or send Nginx log records.
+- Nginx error logs use a separate Agent-local opt-in:
+  `NADI_AGENT_SYSTEM_LOG_TELEMETRY_ENABLED=true`, together with the explicit
+  absolute path `NADI_AGENT_NGINX_ERROR_LOG_PATH`. Both are disabled/empty by
+  default. Collection also requires an active, acknowledged `system_logs`
+  grant on at least one application on the same Agent.
+- The Nginx collector reads incrementally from a durable file cursor. It
+  advances the cursor only after the entries have been appended to the durable
+  server spool. Each log entry is a separate bounded spool event. The default
+  per-poll limit is 20 entries and the read window is 1 MiB.
+- If Nginx log rotation occurs while the previous file still has unread bytes,
+  or the file is truncated before the cursor is drained, collection fails
+  closed and leaves the cursor unchanged. The operator must investigate the
+  rotated/truncated file; the Agent does not change Nginx or logrotate settings.
 - Application log summaries use the existing Laravel Bridge
   `GET /_nadi/v1/logs/application` endpoint. They are collected and mapped
   only when the exact `application_logs` grant is active and the Agent-local
   opt-in `NADI_AGENT_LOG_TELEMETRY_ENABLED=true` is explicitly configured.
   This opt-in defaults to `false`.
-- Keep that opt-in disabled: the Bridge summary endpoint does not expose a
-  durable cursor, and Agent-side persistent deduplication across polling and
-  restart is not yet implemented. Enabling it before that work is complete
-  could re-submit recent summary entries.
+- The Agent stores Bridge fingerprints in a durable per-application dedupe
+  state after the application summary has been appended to the application
+  spool. This prevents repeated summary entries across normal polling and
+  restart. The Bridge still does not expose a cursor or raw log messages.
 - The Bridge returns sanitized summary metadata, not raw log messages. The
   Agent derives the Central `message` field from the returned exception type;
   it does not invent raw log contents.
@@ -87,7 +98,9 @@ all sensitive information is always detected.
   ownership, groups, ACLs, file permissions, or service state.
 - Only explicitly configured absolute paths are eligible. Symlink path
   components and non-regular files are rejected.
-- The existing bounded read limits remain in force.
+- The Nginx read window remains bounded at 1 MiB per collection cycle and the
+  default collection count is 20 entries per cycle. Each individual spool
+  event remains below the local spool record limit.
 - Log streams must pass the same Activation Gate and exact capability checks
   as other telemetry. Server log records require at least one eligible
   acknowledged application grant on the same Agent with `system_logs`.
