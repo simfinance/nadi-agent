@@ -70,15 +70,16 @@ func (a *App) collectNginxErrorLogs(agentState state.State) {
 		return
 	}
 
-	record, err := a.telemetrySpool.AppendNginxErrorLogs(
+	records, err := a.telemetrySpool.AppendNginxErrorLogs(
 		agentState.CentralServerID,
 		agentState.CentralAgentID,
 		entries,
 	)
 	if err != nil {
 		a.logger.Error(
-			"Nginx error log entries could not be persisted to the durable server spool",
+			"Nginx error log entries could not be fully persisted to the durable server spool; cursor was not advanced",
 			"server_id", agentState.CentralServerID,
+			"persisted_entry_count", len(records),
 			"error", err,
 		)
 		return
@@ -87,14 +88,14 @@ func (a *App) collectNginxErrorLogs(agentState state.State) {
 	if err := a.logDedupe.Commit("server:nginx", unseen); err != nil {
 		a.logger.Error(
 			"Nginx error log fingerprints could not be persisted after the spool append; duplicate entries may be collected again",
-			"event_id", record.EventID,
+			"event_id", records[0].EventID,
 			"error", err,
 		)
 	}
 	if err := a.nginxErrorLogs.Commit(cursor); err != nil {
 		a.logger.Error(
 			"Nginx error log cursor could not be persisted after the durable spool append; duplicate entries may be collected again",
-			"event_id", record.EventID,
+			"event_id", records[0].EventID,
 			"error", err,
 		)
 		return
@@ -102,8 +103,8 @@ func (a *App) collectNginxErrorLogs(agentState state.State) {
 
 	a.logger.Info(
 		"Nginx error log entries collected and queued locally",
-		"event_id", record.EventID,
-		"server_id", record.ServerID,
+		"first_event_id", records[0].EventID,
+		"server_id", records[0].ServerID,
 		"entry_count", len(entries),
 	)
 }
