@@ -2,6 +2,10 @@ package handoffbroker
 
 import (
 	"encoding/json"
+	"io"
+	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -219,4 +223,73 @@ func TestDecodeRequestRequiresExplicitCapabilitiesArray(t *testing.T) {
 	if _, err := decodeRequest(payload); err == nil {
 		t.Fatal("activation request must include the capabilities array")
 	}
+}
+
+func TestHandleConnectionRejectsUnexpectedPeerUID(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "handoff.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	config := Config{
+		SchemaVersion: 1,
+		AgentUID:      uint32(os.Getuid() + 1),
+		AgentGID:      uint32(os.Getgid() + 1),
+		Applications: []Mapping{
+			{
+				ApplicationID:       "app-1",
+				ApplicationKey:      "stable-key",
+				BasePath:            "/srv/www/app",
+				RuntimeUID:          33,
+				RuntimeGID:          33,
+				CredentialFile:      "/srv/www/app/storage/app/private/nadi/credential",
+				ActivationStateFile: "/run/nadi-agent/bridge-state/app-1.json",
+			},
+		},
+	}
+	server := &Server{config: config}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		connection, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			return
+		}
+		server.handleConnection(connection)
+	}()
+
+	connection, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+
+	_, err = connection.Write([]byte(`{"protocol_version":1,"operation":"publish_application_credential","application_id":"app-1","application_key":"stable-key","credential":"secret"}` + "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	unixConnection := connection.(*net.UnixConn)
+	if err := unixConnection.CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+
+	responseBytes, err := io.ReadAll(connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var response Response
+	if err := json.Unmarshal(responseBytes, &response); err != nil {
+		t.Fatal(err)
+	}
+
+	if response.Success || response.ErrorCode != "peer_not_authorized" {
+		t.Fatalf("unexpected response for untrusted peer: %#v", response)
+	}
+
+	<-done
 }
