@@ -206,7 +206,6 @@ func TestServerStreamAllowedRequiresExactServerCapability(t *testing.T) {
 	}
 }
 
-
 func TestBuildApplicationLogInputsMapsBridgeSummaryWithoutRawMessages(t *testing.T) {
 	applicationID := "11111111-1111-4111-8111-111111111111"
 	record := appspool.Record{

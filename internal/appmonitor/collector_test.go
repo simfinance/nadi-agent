@@ -152,7 +152,6 @@ func TestCollectDoesNotFollowRedirects(t *testing.T) {
 	}
 }
 
-
 func TestCollectApplicationLogsUsesExistingBridgeSummaryEndpoint(t *testing.T) {
 	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
