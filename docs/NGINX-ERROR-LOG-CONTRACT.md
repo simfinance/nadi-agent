@@ -1,92 +1,83 @@
-# Nginx Error Log Collection Contract
+# NADI Central v1.1 Log Telemetry Contract
 
-Status: proposed Agent-side contract; not yet enabled in the runtime or accepted
-by NADI Central.
+Status: Agent-side schema normalization and Nginx collector output are implemented
+in this branch. Runtime log delivery is not enabled or wired. Central log
+ingestion must remain disabled until the Central deployment gate is explicitly
+completed by its operator.
 
-## Capability
+## Capability and scope
 
-Use the exact Activation Grant capability:
+Use only the exact signed Activation Grant capabilities:
 
-- `system_logs`: permits server-level system log collection, including Nginx
-  error-log metadata.
+- `system_logs`: server-scoped Nginx error logs. The telemetry record omits
+  `application_id`.
+- `application_logs`: logs for one application. The record must contain that
+  application's exact `application_id`; another application's grant cannot
+  authorize it.
 
-This capability is separate from `server_metrics`. A grant containing only
-`server_metrics` must never authorize log access.
+These capabilities are independent from `server_metrics` and
+`application_metrics`. No capability substitutes for another.
 
-Laravel application logs remain a separate application-scoped capability:
+## nginx_error_logs payload
 
-- `application_logs`: permits the Bridge's redacted Laravel application error
-  summary endpoint for that enrolled application.
+Each record's `data` must contain exactly:
 
-Both names are proposed contract values. Central must issue them in signed
-Activation Grants before their respective collectors can run.
+- `timestamp`: required RFC3339-compatible date/time string.
+- `severity`: one of `emergency`, `alert`, `critical`, `error`,
+  `warning`, `notice`, `info`, `debug`.
+- `message`: required non-empty string, maximum 8,192 bytes.
+- `source`: optional; when supplied it must equal `nginx`.
 
-## Stream
+The Agent normalizes timestamps to UTC and maps Nginx severity aliases
+`emerg`, `crit`, and `warn` to `emergency`, `critical`, and
+`warning`. The collector emits the fixed source `nginx`.
 
-Use the existing telemetry stream name:
+## application_logs payload
 
-- `nginx_error_logs`
+Each record's `data` must contain exactly:
 
-The stream is server-scoped. Its telemetry record must omit `application_id`.
+- `timestamp`: required RFC3339-compatible date/time string.
+- `level`: one of the eight levels listed above.
+- `channel`: required non-empty string, maximum 100 bytes.
+- `message`: required non-empty string, maximum 8,192 bytes.
+- `context`: optional object with at most 50 top-level fields.
 
-## Payload schema
+Context strings are limited to 2,048 characters. Only scalar string, boolean,
+number, and null context values are accepted. Nested objects and arrays are
+rejected. Unknown top-level fields are rejected. Raw stack traces are rejected.
 
-Version 1 payload:
+The Agent's `internal/logtelemetry` normalizers redact common authorization,
+Bearer, cookie, password, token, API-key, secret, and credential patterns.
+Sensitive context keys are replaced with `[REDACTED]`.
 
-```json
-{
-    "schema_version": 1,
-    "status": "available",
-    "collected_at": "2026-11-23T08:00:00Z",
-    "entries": [
-        {
-            "timestamp": "2026-11-23T07:59:58Z",
-            "level": "error",
-            "fingerprint": "64-character-lowercase-sha256"
-        }
-    ]
-}
-```
+**Redaction is best-effort, not exhaustive.** It cannot guarantee detection of
+every secret or personally identifying value. The Agent must not claim that
+all sensitive information is always detected.
 
-Allowed statuses:
+## Collection and delivery boundaries
 
-- `available`
-- `disabled`
-- `unavailable`
+- The Nginx collector is still not wired into the Agent runtime or telemetry
+  spool. Its output schema is prepared, but this branch does not start log
+  collection or send log records.
+- The Laravel Bridge currently has no supported application-log endpoint in
+  this Agent integration. Do not invent log data or enable application log
+  collection until a real Bridge endpoint and contract are available.
+- Queue and scheduler endpoints that return HTTP 501 remain unsupported; the
+  Agent must not synthesize queue or scheduler telemetry.
+- The collector remains read-only. It must not change Nginx configuration,
+  ownership, groups, ACLs, file permissions, or service state.
+- Only explicitly configured absolute paths are eligible. Symlink path
+  components and non-regular files are rejected.
+- The existing bounded read limits remain in force.
+- Log streams must pass the same Activation Gate and exact capability checks
+  as other telemetry. Server log records require at least one eligible
+  acknowledged application grant on the same Agent with `system_logs`.
+- Application log records require the exact application's eligible,
+  acknowledged grant with `application_logs`.
 
-Allowed entry levels:
+## Central deployment gate
 
-- `emerg`
-- `alert`
-- `crit`
-- `error`
-
-No raw log message, request URI, query string, IP address, hostname, upstream
-address, header, cookie, credential, or stack trace is part of the payload.
-The fingerprint is SHA-256 over a normalized message after removing quoted
-values, common secret assignments, and IP/address tokens.
-
-## Collection boundaries
-
-- Collection is disabled unless an administrator explicitly configures an
-  absolute Nginx error-log path.
-- The Agent must not change Nginx configuration, ownership, group membership,
-  ACLs, or file permissions.
-- The collector must never request broad `adm` group membership.
-- The Agent runs as the non-root `nadi-agent` user. If the configured file is
-  not readable by that user, report `permission_denied` and fail closed.
-- Only regular files are accepted. Symlink paths and files are rejected.
-- Maximum read window defaults to 1 MiB and cannot exceed 4 MiB.
-- Maximum emitted entries defaults to 100 and cannot exceed 500.
-- Only error-severity entries are emitted.
-- Collection and telemetry delivery must both require a currently valid,
-  acknowledged Activation Grant containing `system_logs`.
-- When the capability is absent, expired, revoked, or the application/server
-  gate closes, collection stops and pending log records are cleared.
-
-## Rollout
-
-This contract is not yet wired into the Agent runtime. The next implementation
-step must add a dedicated bounded log spool and a capability-specific runtime
-gate, then validate the stream payload against Central's telemetry ingestion
-contract. Do not enable or publish the feature before those checks pass.
+Do not change Central configuration from the Agent. Central must continue to
+use `NADI_TELEMETRY_LOGS_ENABLED=false` until its operator has confirmed the
+schema, redaction, capability enforcement, Central/Agent integration tests,
+and non-production end-to-end validation.
