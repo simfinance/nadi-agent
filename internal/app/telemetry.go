@@ -154,11 +154,11 @@ func (a *App) deliverTelemetry(
 	}
 
 	if err := a.telemetrySpool.Acknowledge(serverEventIDs); err != nil {
-		return fmt.Errorf("acknowledge Central-accepted server telemetry: %w", err)
+		return fmt.Errorf("acknowledge completed server telemetry: %w", err)
 	}
 	for applicationID, eventIDs := range applicationEventIDs {
 		if err := a.applicationSpool.Acknowledge(applicationID, eventIDs); err != nil {
-			return fmt.Errorf("acknowledge Central-accepted telemetry for application %s: %w", applicationID, err)
+			return fmt.Errorf("acknowledge completed telemetry for application %s: %w", applicationID, err)
 		}
 	}
 	if err := a.telemetrySender.Complete(); err != nil {
