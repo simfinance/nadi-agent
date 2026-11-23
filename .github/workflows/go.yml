@@ -1,30 +1,31 @@
 name: Go validation
 
 on:
-    push:
-        branches:
-            - "**"
     pull_request:
         types:
             - opened
             - synchronize
             - reopened
 
+permissions:
+    contents: read
+
 concurrency:
-    group: go-validation-${{ github.ref }}
+    group: go-validation-${{ github.event.pull_request.number }}
     cancel-in-progress: true
 
 jobs:
     format:
-        if: github.event_name == 'push'
+        if: github.event.pull_request.head.repo.full_name == github.repository
         runs-on: ubuntu-latest
         permissions:
             contents: write
         steps:
-            - name: Checkout
+            - name: Checkout Agent branch
               uses: actions/checkout@v4
               with:
-                  ref: ${{ github.ref }}
+                  repository: ${{ github.event.pull_request.head.repo.full_name }}
+                  ref: ${{ github.event.pull_request.head.ref }}
 
             - name: Set up Go
               uses: actions/setup-go@v5
@@ -41,19 +42,21 @@ jobs:
                       git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
                       git add '*.go'
                       git commit -m "Apply gofmt to Agent changes"
-                      git push origin HEAD:"${GITHUB_REF_NAME}"
+                      git push origin HEAD:"${{ github.event.pull_request.head.ref }}"
                   fi
 
     validate:
-        if: github.event_name == 'pull_request'
+        needs: format
+        if: always() && (needs.format.result == 'success' || needs.format.result == 'skipped')
         runs-on: ubuntu-latest
         permissions:
             contents: read
         steps:
-            - name: Checkout
+            - name: Checkout Agent branch
               uses: actions/checkout@v4
               with:
-                  ref: ${{ github.event.pull_request.head.sha }}
+                  repository: ${{ github.event.pull_request.head.repo.full_name }}
+                  ref: ${{ github.event.pull_request.head.ref }}
 
             - name: Set up Go
               uses: actions/setup-go@v5
