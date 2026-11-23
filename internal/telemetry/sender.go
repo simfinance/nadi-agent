@@ -89,7 +89,7 @@ type Batch struct {
 
 type pendingBatch struct {
 	Batch     Batch          `json:"batch"`
-	Sources   []Source        `json:"sources"`
+	Sources   []Source       `json:"sources"`
 	Following []pendingBatch `json:"following,omitempty"`
 }
 
@@ -481,7 +481,6 @@ func (s *Sender) buildPending(instanceID string, inputs []InputRecord) (*pending
 	}
 	return &pendingBatch{Batch: batch, Sources: sources}, nil
 }
-
 
 func (s *Sender) splitPending(pending pendingBatch) error {
 	middle := len(pending.Batch.Records) / 2
