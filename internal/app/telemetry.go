@@ -59,6 +59,7 @@ func (a *App) deliverTelemetry(
 		if err != nil {
 			return fmt.Errorf("read server telemetry spool: %w", err)
 		}
+	serverRecordLoop:
 		for _, record := range serverRecords {
 			if len(inputs) >= telemetry.MaximumBatchRecords {
 				break
@@ -88,7 +89,7 @@ func (a *App) deliverTelemetry(
 					continue
 				}
 				if len(inputs)+len(record.Payload.NginxErrorLogs) > telemetry.MaximumBatchRecords {
-					break
+					break serverRecordLoop
 				}
 				for index, entry := range record.Payload.NginxErrorLogs {
 					raw, err := json.Marshal(entry)
