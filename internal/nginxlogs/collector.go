@@ -1,9 +1,12 @@
 package nginxlogs
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"net"
 	"os"
 	"path/filepath"
@@ -57,6 +60,14 @@ type Collector struct {
 	path       string
 	maxBytes   int64
 	maxEntries int
+	statePath  string
+}
+
+type Cursor struct {
+	Device      uint64 `json:"device"`
+	Inode       uint64 `json:"inode"`
+	Offset      int64  `json:"offset"`
+	ObservedSize int64 `json:"observed_size"`
 }
 
 func NewCollector(path string, maxBytes int64, maxEntries int) (*Collector, error) {
@@ -79,6 +90,202 @@ func NewCollector(path string, maxBytes int64, maxEntries int) (*Collector, erro
 		maxBytes:   maxBytes,
 		maxEntries: maxEntries,
 	}, nil
+}
+
+func NewDurableCollector(path string, statePath string, maxBytes int64, maxEntries int) (*Collector, error) {
+	collector, err := NewCollector(path, maxBytes, maxEntries)
+	if err != nil {
+		return nil, err
+	}
+	if collector.path == "" {
+		return collector, nil
+	}
+	if !filepath.IsAbs(statePath) || filepath.Clean(statePath) != statePath {
+		return nil, errors.New("Nginx error log cursor path must be a clean absolute path")
+	}
+	collector.statePath = statePath
+	return collector, nil
+}
+
+func (c *Collector) CollectWithCursor(now time.Time) (Snapshot, Cursor, error) {
+	snapshot := Snapshot{
+		Status:      StatusDisabled,
+		CollectedAt: now.UTC(),
+		Entries:     make([]Entry, 0),
+	}
+	if c == nil || c.path == "" {
+		return snapshot, Cursor{}, nil
+	}
+	if c.statePath == "" {
+		return Snapshot{}, Cursor{}, errors.New("durable Nginx error log collector requires a cursor path")
+	}
+
+	file, err := openRegularFileNoFollow(c.path)
+	if err != nil {
+		snapshot.Status = StatusUnavailable
+		snapshot.ErrorCode = classifyFileError(err)
+		return snapshot, Cursor{}, err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return Snapshot{}, Cursor{}, fmt.Errorf("stat Nginx error log: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return Snapshot{}, Cursor{}, errors.New("Nginx error log must be a regular non-symlink file")
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return Snapshot{}, Cursor{}, errors.New("Nginx error log identity is unavailable")
+	}
+
+	current := Cursor{
+		Device:       uint64(stat.Dev),
+		Inode:        stat.Ino,
+		ObservedSize: info.Size(),
+	}
+	previous, exists, err := c.loadCursor()
+	if err != nil {
+		return Snapshot{}, Cursor{}, err
+	}
+	if exists {
+		if previous.Device != current.Device || previous.Inode != current.Inode {
+			if previous.Offset < previous.ObservedSize {
+				return Snapshot{}, Cursor{}, errors.New("Nginx error log rotated before the previous file was fully collected")
+			}
+		} else {
+			if info.Size() < previous.Offset {
+				return Snapshot{}, Cursor{}, errors.New("Nginx error log was truncated before the previous cursor was drained")
+			}
+			current.Offset = previous.Offset
+		}
+	}
+
+	if current.Offset > info.Size() {
+		return Snapshot{}, Cursor{}, errors.New("Nginx error log cursor exceeds current file size")
+	}
+	remaining := info.Size() - current.Offset
+	readSize := remaining
+	if readSize > c.maxBytes {
+		readSize = c.maxBytes
+	}
+	if readSize == 0 {
+		snapshot.Status = StatusAvailable
+		return snapshot, current, nil
+	}
+
+	content := make([]byte, readSize)
+	readCount, readErr := file.ReadAt(content, current.Offset)
+	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+		return Snapshot{}, Cursor{}, fmt.Errorf("read Nginx error log at cursor: %w", readErr)
+	}
+	content = content[:readCount]
+
+	consumed := 0
+	for consumed < len(content) {
+		newline := bytes.IndexByte(content[consumed:], '\\n')
+		lineEnd := -1
+		lineLength := 0
+		if newline >= 0 {
+			lineEnd = consumed + newline
+			lineLength = newline + 1
+		} else if current.Offset+int64(len(content)) == info.Size() {
+			lineEnd = len(content)
+			lineLength = len(content) - consumed
+		} else {
+			break
+		}
+
+		line := string(content[consumed:lineEnd])
+		if entry, valid := parseLine(line); valid {
+			snapshot.Entries = append(snapshot.Entries, entry)
+		}
+		consumed += lineLength
+		if len(snapshot.Entries) >= c.maxEntries {
+			break
+		}
+	}
+	if consumed == 0 && len(content) == c.maxBytes && current.Offset+int64(len(content)) < info.Size() {
+		return Snapshot{}, Cursor{}, errors.New("Nginx error log contains a line larger than the configured read window")
+	}
+
+	current.Offset += int64(consumed)
+	snapshot.Status = StatusAvailable
+	return snapshot, current, nil
+}
+
+func (c *Collector) Commit(cursor Cursor) error {
+	if c == nil || c.statePath == "" {
+		return errors.New("durable Nginx error log cursor is not configured")
+	}
+	if cursor.Offset < 0 || cursor.ObservedSize < cursor.Offset {
+		return errors.New("Nginx error log cursor is invalid")
+	}
+
+	content, err := json.Marshal(cursor)
+	if err != nil {
+		return fmt.Errorf("encode Nginx error log cursor: %w", err)
+	}
+	content = append(content, '\\n')
+
+	if err := os.MkdirAll(filepath.Dir(c.statePath), 0700); err != nil {
+		return fmt.Errorf("create Nginx error log cursor directory: %w", err)
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(c.statePath), ".nginx-cursor-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create Nginx error log cursor state: %w", err)
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+
+	if err := temporary.Chmod(0600); err != nil {
+		temporary.Close()
+		return fmt.Errorf("secure Nginx error log cursor state: %w", err)
+	}
+	if _, err := temporary.Write(content); err != nil {
+		temporary.Close()
+		return fmt.Errorf("write Nginx error log cursor state: %w", err)
+	}
+	if err := temporary.Sync(); err != nil {
+		temporary.Close()
+		return fmt.Errorf("sync Nginx error log cursor state: %w", err)
+	}
+	if err := temporary.Close(); err != nil {
+		return fmt.Errorf("close Nginx error log cursor state: %w", err)
+	}
+	if err := os.Rename(temporaryPath, c.statePath); err != nil {
+		return fmt.Errorf("replace Nginx error log cursor state: %w", err)
+	}
+
+	directory, err := os.Open(filepath.Dir(c.statePath))
+	if err != nil {
+		return fmt.Errorf("open Nginx error log cursor directory: %w", err)
+	}
+	defer directory.Close()
+	if err := directory.Sync(); err != nil {
+		return fmt.Errorf("sync Nginx error log cursor directory: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Collector) loadCursor() (Cursor, bool, error) {
+	content, err := os.ReadFile(c.statePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return Cursor{}, false, nil
+	}
+	if err != nil {
+		return Cursor{}, false, fmt.Errorf("read Nginx error log cursor: %w", err)
+	}
+	var cursor Cursor
+	if err := json.Unmarshal(content, &cursor); err != nil {
+		return Cursor{}, false, fmt.Errorf("decode Nginx error log cursor: %w", err)
+	}
+	if cursor.Offset < 0 || cursor.ObservedSize < cursor.Offset {
+		return Cursor{}, false, errors.New("persisted Nginx error log cursor is invalid")
+	}
+	return cursor, true, nil
 }
 
 func (c *Collector) Collect(now time.Time) Snapshot {
