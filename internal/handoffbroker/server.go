@@ -639,17 +639,16 @@ func ensureRootOwnedDirectory(path string) error {
 }
 
 func readBoundedLine(connection net.Conn, maximum int64) ([]byte, error) {
-	reader := bufio.NewReader(io.LimitReader(connection, maximum+1))
-	line, err := reader.ReadBytes('\n')
+	content, err := io.ReadAll(io.LimitReader(connection, maximum+1))
 	if err != nil {
 		return nil, err
 	}
 
-	if len(line) == 0 || int64(len(line)) > maximum {
+	if len(content) == 0 || int64(len(content)) > maximum || content[len(content)-1] != '\n' {
 		return nil, errors.New("request must be one bounded newline-terminated JSON object")
 	}
 
-	return bytes.TrimSuffix(line, []byte("\n")), nil
+	return bytes.TrimSuffix(content, []byte("\n")), nil
 }
 
 func decodeRequest(content []byte) (Request, error) {
