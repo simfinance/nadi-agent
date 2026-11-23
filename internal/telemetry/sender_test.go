@@ -919,3 +919,54 @@ func TestSendRetainsPendingBatchWhenCentralACKIsInvalid(t *testing.T) {
 		t.Fatalf("pending batch was removed after invalid ACK: %v", err)
 	}
 }
+
+
+func TestBuildPendingNginxErrorLogsUsesServerScopeAndSystemLogsCapability(t *testing.T) {
+	sender, err := NewSender("https://central.example", t.TempDir(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pending, err := sender.buildPending("22222222-2222-4222-8222-222222222222", []InputRecord{{
+		Stream: "nginx_error_logs",
+		Data:   json.RawMessage(`{"timestamp":"2026-11-23T08:00:00Z","severity":"error","message":"upstream failed","source":"nginx"}`),
+		Source: Source{
+			Kind:    "server",
+			EventID: "nginx-error-event",
+		},
+	}})
+	if err != nil {
+		t.Fatalf("build server-scoped Nginx log batch: %v", err)
+	}
+	if len(pending.Batch.Records) != 1 {
+		t.Fatalf("expected one Nginx error log record, got %d", len(pending.Batch.Records))
+	}
+	if pending.Batch.Records[0].ApplicationID != nil {
+		t.Fatal("server-scoped Nginx error log must not contain application_id")
+	}
+	capability, found := RequiredCapability("nginx_error_logs")
+	if !found || capability != "system_logs" || !IsServerStream("nginx_error_logs") {
+		t.Fatalf("unexpected Nginx error log mapping: capability=%q found=%t server=%t", capability, found, IsServerStream("nginx_error_logs"))
+	}
+}
+
+func TestBuildPendingRejectsNginxErrorLogsWithApplicationID(t *testing.T) {
+	sender, err := NewSender("https://central.example", t.TempDir(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	applicationID := "11111111-1111-4111-8111-111111111111"
+	_, err = sender.buildPending("22222222-2222-4222-8222-222222222222", []InputRecord{{
+		Stream:        "nginx_error_logs",
+		ApplicationID: &applicationID,
+		Data:          json.RawMessage(`{"timestamp":"2026-11-23T08:00:00Z","severity":"error","message":"upstream failed","source":"nginx"}`),
+		Source: Source{
+			Kind:    "server",
+			EventID: "nginx-error-event",
+		},
+	}})
+	if err == nil {
+		t.Fatal("expected application_id on server-scoped Nginx log to be rejected")
+	}
+}
