@@ -64,12 +64,19 @@ all sensitive information is always detected.
 
 ## Collection and delivery boundaries
 
-- The Nginx collector is still not wired into the Agent runtime or telemetry
-  spool. Its output schema is prepared, but this branch does not start log
-  collection or send log records.
-- The Laravel Bridge currently has no supported application-log endpoint in
-  this Agent integration. Do not invent log data or enable application log
-  collection until a real Bridge endpoint and contract are available.
+- The Nginx collector is still not wired into the Agent runtime or
+  telemetry spool. Its output schema is prepared, but this branch does not
+  start Nginx log collection or send Nginx log records.
+- Application log summaries use the existing Laravel Bridge
+  `GET /_nadi/v1/logs/application` endpoint. They are collected and mapped
+  only when the exact `application_logs` grant is active and the Agent-local
+  opt-in `NADI_AGENT_LOG_TELEMETRY_ENABLED=true` is explicitly configured.
+  This opt-in defaults to `false`.
+- The Bridge returns sanitized summary metadata, not raw log messages. The
+  Agent derives the Central `message` field from the returned exception type;
+  it does not invent raw log contents.
+- A Bridge HTTP 501 marks the endpoint unsupported. The Agent does not
+  synthesize application log events when the endpoint is unsupported.
 - Queue and scheduler endpoints that return HTTP 501 remain unsupported; the
   Agent must not synthesize queue or scheduler telemetry.
 - The collector remains read-only. It must not change Nginx configuration,
