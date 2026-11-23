@@ -216,6 +216,7 @@ func parseLine(line string) (Entry, bool) {
 	normalized := strings.ToLower(matches[3])
 	normalized = quotedPattern.ReplaceAllString(normalized, "<quoted>")
 	normalized = secretPattern.ReplaceAllString(normalized, "$1=<redacted>")
+	normalized = cookiePattern.ReplaceAllString(normalized, "$1=<redacted>")
 	normalized = ipv4Pattern.ReplaceAllString(normalized, "<ip>")
 	normalized = ipv6Pattern.ReplaceAllStringFunc(normalized, func(candidate string) string {
 		if net.ParseIP(candidate) != nil {
