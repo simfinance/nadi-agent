@@ -273,7 +273,6 @@ func (s *Sender) buildPending(instanceID string, inputs []InputRecord) (*pending
 		if index >= MaximumBatchRecords {
 			break
 		}
-
 		if _, supported := RequiredCapability(input.Stream); !supported {
 			return nil, fmt.Errorf("unsupported Central telemetry stream %q", input.Stream)
 		}
