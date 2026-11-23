@@ -185,7 +185,7 @@ func TestCollectApplicationLogsUsesExistingBridgeSummaryEndpoint(t *testing.T) {
 	collector := NewCollector(time.Second)
 	snapshot := collector.Collect(
 		context.Background(),
-		server.URL,
+		server.URL+"/_nadi/v1",
 		"app-credential",
 		[]string{CapabilityApplicationLogs},
 		time.Now(),
@@ -212,7 +212,7 @@ func TestCollectMarksApplicationLogsUnsupportedOnBridge501(t *testing.T) {
 	collector := NewCollector(time.Second)
 	snapshot := collector.Collect(
 		context.Background(),
-		server.URL,
+		server.URL+"/_nadi/v1",
 		"app-credential",
 		[]string{CapabilityApplicationLogs},
 		time.Now(),
