@@ -38,18 +38,18 @@ func main() {
 
 		brokerConfig, err := handoffbroker.LoadConfig(*brokerConfigPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "NADI handoff broker configuration error: %v\\n", err)
+			fmt.Fprintf(os.Stderr, "NADI handoff broker configuration error: %v\n", err)
 			os.Exit(1)
 		}
 
 		broker, err := handoffbroker.NewServer(*brokerSocketPath, brokerConfig)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "NADI handoff broker initialization error: %v\\n", err)
+			fmt.Fprintf(os.Stderr, "NADI handoff broker initialization error: %v\n", err)
 			os.Exit(1)
 		}
 
 		if err := broker.ListenAndServe(); err != nil {
-			fmt.Fprintf(os.Stderr, "NADI handoff broker stopped: %v\\n", err)
+			fmt.Fprintf(os.Stderr, "NADI handoff broker stopped: %v\n", err)
 			os.Exit(1)
 		}
 
