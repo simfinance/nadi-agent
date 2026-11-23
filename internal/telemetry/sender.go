@@ -26,19 +26,55 @@ const (
 )
 
 var (
-	uuidPattern    = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$`)
-	allowedStreams = map[string]struct{}{
-		"server_metrics":            {},
-		"nginx_metrics":             {},
-		"nginx_vhost_metrics":       {},
-		"nginx_access_logs":         {},
-		"nginx_error_logs":          {},
-		"application_metrics":       {},
-		"application_logs":          {},
-		"application_events":        {},
-		"nginx_http_requests":       {},
-		"application_http_requests": {},
-		"application_http_errors":   {},
+	uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}package telemetry
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"time"
+)
+
+const (
+	EndpointPath        = "/api/v1/nadi/agent/telemetry/batches"
+	MaximumBatchBytes   = 1024 * 1024
+	MaximumRecordBytes  = 64 * 1024
+	MaximumBatchRecords = 500
+)
+
+)
+
+	streamCapabilities = map[string]string{
+		"server_metrics":       "server_metrics",
+		"nginx_metrics":        "server_metrics",
+		"nginx_vhost_metrics":  "server_metrics",
+		"nginx_error_logs":     "system_logs",
+		"application_metrics":  "application_metrics",
+		"application_logs":     "application_logs",
+		"database_metrics":     "database_monitoring",
+		"database_connections": "database_monitoring",
+		"queue_metrics":        "queue_monitoring",
+		"queue_jobs":           "queue_monitoring",
+		"scheduler_metrics":    "scheduler_monitoring",
+		"scheduler_events":     "scheduler_monitoring",
+	}
+
+	serverStreams = map[string]struct{}{
+		"server_metrics":       {},
+		"nginx_metrics":        {},
+		"nginx_vhost_metrics":  {},
+		"nginx_error_logs":     {},
 	}
 )
 
@@ -131,6 +167,16 @@ func NewSender(baseURL string, directory string, timeout time.Duration) (*Sender
 		},
 		dir: directory,
 	}, nil
+}
+
+func RequiredCapability(stream string) (string, bool) {
+	capability, found := streamCapabilities[stream]
+	return capability, found
+}
+
+func IsServerStream(stream string) bool {
+	_, found := serverStreams[stream]
+	return found
 }
 
 func (s *Sender) Send(ctx context.Context, agentID string, instanceID string, credential string, inputs []InputRecord) ([]Source, error) {
@@ -247,26 +293,30 @@ func (s *Sender) buildPending(instanceID string, inputs []InputRecord) (*pending
 	}
 	sources := make([]Source, 0, len(inputs))
 	for _, input := range inputs {
-		if _, supported := allowedStreams[input.Stream]; !supported {
+		if _, supported := RequiredCapability(input.Stream); !supported {
 			return nil, fmt.Errorf("unsupported Central telemetry stream %q", input.Stream)
 		}
 		if len(input.Data) == 0 || !json.Valid(input.Data) {
 			return nil, errors.New("telemetry input contains invalid data JSON")
 		}
-		if strings.HasPrefix(input.Stream, "application_") && (input.ApplicationID == nil || !uuidPattern.MatchString(*input.ApplicationID)) {
-			return nil, errors.New("application telemetry requires a valid application_id UUID")
+		if input.MetricSet != nil && len(*input.MetricSet) > 100 {
+			return nil, errors.New("telemetry metric_set exceeds 100 characters")
 		}
-		if input.Stream == "server_metrics" && input.ApplicationID != nil {
-			return nil, errors.New("server_metrics must not contain application_id")
+
+		if IsServerStream(input.Stream) {
+			if input.ApplicationID != nil {
+				return nil, fmt.Errorf("server stream %s must not contain application_id", input.Stream)
+			}
+		} else {
+			if input.ApplicationID == nil || !uuidPattern.MatchString(*input.ApplicationID) {
+				return nil, fmt.Errorf("application stream %s requires a valid application_id UUID", input.Stream)
+			}
 		}
 		if input.ApplicationID != nil && !uuidPattern.MatchString(*input.ApplicationID) {
 			return nil, errors.New("telemetry application_id must be a UUID")
 		}
-		if input.MetricSet != nil && len(*input.MetricSet) > 100 {
-			return nil, errors.New("telemetry metric_set exceeds 100 characters")
-		}
-		if len(input.Data) > MaximumRecordBytes {
-			return nil, fmt.Errorf("telemetry data for stream %s exceeds %d bytes", input.Stream, MaximumRecordBytes)
+		if input.Source.EventID == "" {
+			return nil, errors.New("telemetry source event_id must not be empty")
 		}
 		scope := "server"
 		if input.ApplicationID != nil {
