@@ -208,9 +208,6 @@ func (s *Sender) Send(ctx context.Context, agentID string, instanceID string, cr
 			return nil, fmt.Errorf("encode pending telemetry record: %w", err)
 		}
 		if len(encodedRecord) > MaximumRecordBytes {
-			if err := s.quarantinePending(http.StatusRequestEntityTooLarge, "single telemetry record exceeds 64 KiB"); err != nil {
-				return nil, fmt.Errorf("quarantine oversized telemetry record: %w", err)
-			}
 			return s.quarantinedSourcesOrAdvance(pending, http.StatusRequestEntityTooLarge)
 		}
 	}
@@ -221,10 +218,7 @@ func (s *Sender) Send(ctx context.Context, agentID string, instanceID string, cr
 	}
 	if len(body) > MaximumBatchBytes {
 		if len(pending.Batch.Records) == 1 {
-			if err := s.quarantinePending(http.StatusRequestEntityTooLarge, "single telemetry record exceeds 1 MiB"); err != nil {
-				return nil, fmt.Errorf("quarantine oversized telemetry record: %w", err)
-			}
-			return markQuarantined(pending.Sources, http.StatusRequestEntityTooLarge), nil
+			return s.quarantinedSourcesOrAdvance(pending, http.StatusRequestEntityTooLarge)
 		}
 		if err := s.splitPending(*pending); err != nil {
 			return nil, fmt.Errorf("persist split telemetry batches: %w", err)
@@ -279,17 +273,11 @@ func (s *Sender) Send(ctx context.Context, agentID string, instanceID string, cr
 			return s.acknowledgedSourcesOrAdvance(pending)
 
 		case http.StatusForbidden, http.StatusConflict, http.StatusGone, http.StatusUnprocessableEntity:
-			if err := s.quarantinePending(response.StatusCode, string(responseBody)); err != nil {
-				return nil, fmt.Errorf("quarantine permanent Central telemetry rejection: %w", err)
-			}
 			return s.quarantinedSourcesOrAdvance(pending, response.StatusCode)
 
 		case http.StatusRequestEntityTooLarge:
 			if len(pending.Batch.Records) == 1 {
-				if err := s.quarantinePending(response.StatusCode, "single telemetry record exceeds Central payload limits"); err != nil {
-					return nil, fmt.Errorf("quarantine oversized telemetry record: %w", err)
-				}
-				return markQuarantined(pending.Sources, response.StatusCode), nil
+				return s.quarantinedSourcesOrAdvance(pending, response.StatusCode)
 			}
 			if err := s.splitPending(*pending); err != nil {
 				return nil, fmt.Errorf("persist split telemetry batches after HTTP 413: %w", err)
