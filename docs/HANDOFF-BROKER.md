@@ -4,7 +4,7 @@ Status: implementation foundation; not production-installed or deployment-approv
 
 ## Runtime boundary
 
-The broker is a separate root-owned executable. It is not started by Composer and is not run as part of the Laravel PHP process. It accepts only local Unix-domain socket connections at:
+The broker runs in a dedicated mode of the signed NADI Agent release binary through a separate root-owned systemd service. It is not started by Composer and is not run as part of the Laravel PHP process. The helper installs the same verified binary at the fixed Agent path; systemd invokes its `--handoff-broker` mode. It accepts only local Unix-domain socket connections at:
 
 `/run/nadi-agent/credential-handoff.sock`
 
