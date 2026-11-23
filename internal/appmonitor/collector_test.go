@@ -204,13 +204,14 @@ func TestCollectApplicationLogsUsesExistingBridgeSummaryEndpoint(t *testing.T) {
 }
 
 func TestCollectMarksApplicationLogsUnsupportedOnBridge501(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.WriteHeader(http.StatusNotImplemented)
 		_, _ = writer.Write([]byte(`{"success":false,"error":{"code":"endpoint_not_implemented","message":"unsupported"}}`))
 	}))
 	defer server.Close()
 
 	collector := NewCollector(time.Second)
+	collector.client = server.Client()
 	snapshot := collector.Collect(
 		context.Background(),
 		server.URL+"/_nadi/v1",
