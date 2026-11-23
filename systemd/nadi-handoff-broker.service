@@ -25,3 +25,6 @@ RestrictSUIDSGID=true
 ReadWritePaths=/run/nadi-agent /srv
 CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER
 AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target
