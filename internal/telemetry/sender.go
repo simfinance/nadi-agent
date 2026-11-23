@@ -528,7 +528,6 @@ func inputSourceKey(source Source) string {
 	return source.Kind + "|" + source.ApplicationID + "|" + source.EventID
 }
 
-
 func (s *Sender) splitPending(pending pendingBatch) error {
 	middle := len(pending.Batch.Records) / 2
 	if middle <= 0 || middle >= len(pending.Batch.Records) {
