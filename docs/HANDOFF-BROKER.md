@@ -46,7 +46,7 @@ The broker preserves Central grant capability names. Bridge endpoint mapping is 
 
 ## Runtime directories and permissions
 
-- Socket directory: `/run/nadi-agent`, owner `root:nadi-agent`, mode `0750`.
+- Socket directory: `/run/nadi-agent`, owner `root:root`, mode `0711`. Execute-only access lets the PHP runtime traverse to its assertion file without granting socket access.
 - Socket: owner `root:nadi-agent`, mode `0660`.
 - Activation state directory: `/run/nadi-agent/bridge-state`, owner `root:root`, mode `0711`.
 - Activation assertion: owner `root:<Laravel runtime group>`, mode `0640`.
