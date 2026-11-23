@@ -36,7 +36,9 @@ func (a *App) deliverTelemetry(
 				}
 				return nil
 			}
-			if source.Kind == "application" && !applicationStreamAllowed(decisions, source.ApplicationID, source.Stream) {
+			if source.Kind == "application" &&
+				((source.Stream == "application_logs" && !a.config.LogTelemetryEnabled) ||
+					!applicationStreamAllowed(decisions, source.ApplicationID, source.Stream)) {
 				if err := a.telemetrySender.DiscardPending(); err != nil {
 					return fmt.Errorf("quarantine pending application telemetry after capability gate closed: %w", err)
 				}
@@ -142,7 +144,8 @@ func (a *App) deliverTelemetry(
 				})
 			}
 
-			if hasCapability(decision.Capabilities, appmonitor.CapabilityApplicationLogs) &&
+			if a.config.LogTelemetryEnabled &&
+				hasCapability(decision.Capabilities, appmonitor.CapabilityApplicationLogs) &&
 				record.Payload.Logs.Status == appmonitor.StatusAvailable &&
 				len(record.Payload.Logs.Data) > 0 {
 				logInputs, err := buildApplicationLogInputs(record)
