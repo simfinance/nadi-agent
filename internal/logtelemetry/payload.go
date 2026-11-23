@@ -31,10 +31,10 @@ var (
 		"debug":     {},
 	}
 
-	sensitiveAssignmentPattern = regexp.MustCompile(`(?i)\b(authorization|proxy-authorization|password|passwd|token|access[_-]?token|refresh[_-]?token|cookie|set-cookie|api[_-]?key|secret|credential|private[_-]?key)\b\s*[:=]\s*(?:bearer\s+)?("[^"]*"|'[^']*'|[^\s,;]+)`)
+	sensitiveAssignmentPattern = regexp.MustCompile(`(?i)\b(authorization|proxy-authorization|password|passwd|token|access[_-]?token|refresh[_-]?token|cookie|set-cookie|api[ _-]?key|secret|credential|private[ _-]?key)\b\s*[:=]\s*(?:bearer\s+)?("[^"]*"|'[^']*'|[^\s,;]+)`)
 	cookieHeaderPattern        = regexp.MustCompile(`(?i)\b(cookie|set-cookie)\b\s*[:=]\s*[^,]+`)
 	bearerTokenPattern         = regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/-]+=*`)
-	stackTracePattern          = regexp.MustCompile(`(?im)^\s*(?:at\s+[A-Za-z0-9_.$/<>-]+|goroutine\s+\d+\s+\[|#\d+\s+0x[0-9a-f]+)`)
+	stackTracePattern          = regexp.MustCompile(`(?im)^\s*(?:at\s+[A-Za-z0-9_.$/<>-]+|goroutine\s+\d+\s+\[|#\d+\s+(?:0x[0-9a-f]+|/.*\(\d+\):|\{main\})|Traceback\s+\(most recent call last\):|File\s+"[^"]+",\s+line\s+\d+|Stack trace:)`)
 )
 
 type NginxErrorLog struct {
@@ -252,6 +252,7 @@ func isSensitiveContextKey(key string) bool {
 		"token",
 		"cookie",
 		"api_key",
+		"apikey",
 		"secret",
 		"credential",
 		"private_key",
