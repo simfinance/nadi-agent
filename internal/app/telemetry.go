@@ -134,7 +134,11 @@ func (a *App) deliverTelemetry(
 
 	serverEventIDs := make([]string, 0, len(acknowledged))
 	applicationEventIDs := make(map[string][]string)
+	quarantinedCount := 0
 	for _, source := range acknowledged {
+		if source.Quarantined {
+			quarantinedCount++
+		}
 		switch source.Kind {
 		case "server":
 			serverEventIDs = append(serverEventIDs, source.EventID)
@@ -158,8 +162,9 @@ func (a *App) deliverTelemetry(
 	}
 
 	a.logger.Info(
-		"Central accepted telemetry batch; acknowledged local spool records",
+		"Telemetry delivery disposition persisted; local spool records acknowledged",
 		"record_count", len(acknowledged),
+		"quarantined_count", quarantinedCount,
 	)
 	return nil
 }
