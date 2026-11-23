@@ -105,3 +105,18 @@ func TestSystemLogTelemetryAcceptsExplicitPath(t *testing.T) {
 		t.Fatalf("unexpected system log configuration: %#v", cfg)
 	}
 }
+
+func TestValidateRejectsRelativeHandoffSocketPath(t *testing.T) {
+    cfg := Config{
+        CentralURL: "https://central.example.test",
+        LogLevel: "info",
+        PollInterval: 30 * time.Second,
+        HTTPTimeout: 10 * time.Second,
+        StateDir: "/tmp/nadi-agent-test",
+        HandoffSocketPath: "relative/handoff.sock",
+    }
+
+    if err := cfg.Validate(); err == nil {
+        t.Fatal("expected relative handoff socket path to be rejected")
+    }
+}
