@@ -25,6 +25,8 @@ The current Agent PR branch contains:
 - Control Poll and the signed Activation Grant Runtime Activation Gate.
 - Agent-to-Broker credential and activation-state handoff client.
 - Root-owned local handoff broker with peer UID validation and bounded request handling.
+- The signed Agent binary can now run the broker through its fixed `--handoff-broker` mode, so the same verified release artifact can back the Agent and broker systemd services.
+- A strict multi-application provisioning request decoder validates the 1–20 application mapping, enrollment manifest key correspondence, unique runtime UIDs, canonical non-overlapping paths, and bounded JSON.
 - Broker mapping schema and systemd source unit.
 - An independent release-manifest verifier foundation.
 - An opt-in CLI output containing only non-secret enrollment identity metadata. The output excludes Agent and application credentials and is intended for the provisioning helper; it does not expose or copy state.json.
@@ -77,8 +79,9 @@ The existing local handoff protocol uses a root-owned broker and kernel-authenti
 ## Current implementation gaps
 
 - [ ] Root-owned `nadi-provision` executable and strict request parser.
-- [ ] Multi-application Bridge inventory and PHP-FPM pool resolution.
-- [ ] Multi-application Bridge-to-helper request contract and tests.
+- [x] Multi-application Bridge inventory configuration and per-application PHP-FPM pool identity resolution are implemented in the Bridge PR branch.
+- [x] Bridge-to-helper request contract now carries one enrollment manifest and an `applications` array; Bridge validation tests passed in workflow run #54.
+- [ ] Agent helper request parser and broker-mode changes must pass the current Go validation run.
 - [ ] Root-owned installation of Agent/broker binaries, trusted keys, systemd units, mapping, and exact write-path drop-ins.
 - [ ] Single enrollment invocation and summary-to-mapping reconciliation.
 - [ ] Safe partial-failure handling, post-install verification, and tests.
