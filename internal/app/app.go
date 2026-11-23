@@ -409,8 +409,29 @@ collectionLoop:
 					snapshot.Logs.ErrorCode = "log_fingerprint_filter_failed"
 					snapshot.Logs.Data = nil
 				} else {
-					snapshot.Logs.Data = filtered
-					logFingerprints = fingerprints
+					candidate := appspool.Record{
+						ApplicationID: application.ApplicationID,
+						Timestamp:     now,
+						Payload: appmonitor.Snapshot{
+							Logs: appmonitor.EndpointResult{
+								Status: appmonitor.StatusAvailable,
+								Data:   filtered,
+							},
+						},
+					}
+					if _, validationErr := buildApplicationLogInputs(candidate); validationErr != nil {
+						a.logger.Warn(
+							"Bridge application log summary failed Central v1.1 schema validation; log telemetry skipped for this poll",
+							"application_id", application.ApplicationID,
+							"error", validationErr,
+						)
+						snapshot.Logs.Status = appmonitor.StatusUnavailable
+						snapshot.Logs.ErrorCode = "log_payload_validation_failed"
+						snapshot.Logs.Data = nil
+					} else {
+						snapshot.Logs.Data = filtered
+						logFingerprints = fingerprints
+					}
 				}
 			}
 			record, err := a.applicationSpool.Append(
