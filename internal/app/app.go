@@ -317,6 +317,19 @@ collectionLoop:
 			continue
 		}
 
+		if !hasCapability(decision.Capabilities, appmonitor.CapabilityApplicationMetrics) &&
+			!hasCapability(decision.Capabilities, appmonitor.CapabilityDatabaseMonitoring) {
+			if err := a.applicationSpool.Clear(application.ApplicationID); err != nil {
+				a.logger.Error("Unable to clear application spool because no supported Bridge telemetry capability is available", "application_id", application.ApplicationID, "error", err)
+			}
+			a.logger.Info(
+				"Application collection skipped because the granted Bridge telemetry capabilities are unsupported",
+				"application_id", application.ApplicationID,
+				"capabilities", decision.Capabilities,
+			)
+			continue
+		}
+
 		select {
 		case semaphore <- struct{}{}:
 		case <-ctx.Done():
