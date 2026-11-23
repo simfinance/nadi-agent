@@ -9,7 +9,7 @@ import (
 )
 
 type applicationLogSummaryPayload struct {
-	Source  string `json:"source"`
+	Source  string                       `json:"source"`
 	Entries []applicationLogSummaryEntry `json:"entries"`
 }
 
