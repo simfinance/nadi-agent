@@ -169,3 +169,56 @@ func TestNormalizeApplicationLogRejectsChannelOverOneHundredBytes(t *testing.T) 
 		t.Fatal("expected oversized channel to be rejected")
 	}
 }
+
+
+func TestNormalizeApplicationLogRejectsPHPAndPythonStackTraces(t *testing.T) {
+	messages := []string{
+		"Runtime failure\n#0 /var/www/app/Handler.php(42): App\\Service->run()\n#1 {main}",
+		"Traceback (most recent call last):\n  File \"/srv/app.py\", line 42, in run",
+	}
+
+	for index, message := range messages {
+		raw, err := json.Marshal(ApplicationLog{
+			Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+			Level:     "error",
+			Channel:   "application",
+			Message:   message,
+		})
+		if err != nil {
+			t.Fatalf("encode stack trace case %d: %v", index, err)
+		}
+
+		if _, err := NormalizeApplicationLog(raw); err == nil {
+			t.Fatalf("expected stack trace case %d to be rejected", index)
+		}
+	}
+}
+
+func TestNormalizeApplicationLogRedactsSpacedAndCamelCaseAPIKeys(t *testing.T) {
+	raw := []byte(`{
+		"timestamp":"2026-11-23T08:00:00Z",
+		"level":"warning",
+		"channel":"auth",
+		"message":"request rejected api key=message-secret",
+		"context":{
+			"apiKey":"context-secret"
+		}
+	}`)
+
+	normalized, err := NormalizeApplicationLog(raw)
+	if err != nil {
+		t.Fatalf("normalize application log: %v", err)
+	}
+
+	var result ApplicationLog
+	if err := json.Unmarshal(normalized, &result); err != nil {
+		t.Fatalf("decode normalized application log: %v", err)
+	}
+
+	if strings.Contains(result.Message, "message-secret") {
+		t.Fatal("message retained a spaced API key value")
+	}
+	if result.Context["apiKey"] != "[REDACTED]" {
+		t.Fatalf("camelCase API key context was not redacted: %#v", result.Context)
+	}
+}
