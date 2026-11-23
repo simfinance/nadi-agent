@@ -18,7 +18,7 @@ import (
 
 const (
 	DefaultMaximumBytes   int64 = 1024 * 1024
-	DefaultMaximumEntries       = 100
+	DefaultMaximumEntries       = 20
 	MaximumAllowedBytes   int64 = 4 * 1024 * 1024
 	MaximumAllowedEntries       = 500
 	MaximumMessageBytes         = 8192
