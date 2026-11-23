@@ -25,9 +25,9 @@ type ProvisionRequest struct {
 }
 
 type ProvisionReleaseRequest struct {
-	ManifestBase64 string `json:"manifest_base64"`
+	ManifestBase64  string `json:"manifest_base64"`
 	SignatureBase64 string `json:"signature_base64"`
-	ArtifactPath   string `json:"artifact_path"`
+	ArtifactPath    string `json:"artifact_path"`
 }
 
 type ProvisionApplication struct {
