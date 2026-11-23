@@ -316,7 +316,12 @@ collectionLoop:
 			continue
 		}
 
-		if !hasApplicationMonitoringCapability(decision.Capabilities) {
+		capabilities := append([]string(nil), decision.Capabilities...)
+		if !a.config.LogTelemetryEnabled {
+			capabilities = withoutCapability(capabilities, appmonitor.CapabilityApplicationLogs)
+		}
+
+		if !hasApplicationMonitoringCapability(capabilities) {
 			a.logger.Debug(
 				"Application collection skipped because no supported monitoring capability is granted; durable spool is retained",
 				"application_id", application.ApplicationID,
@@ -324,9 +329,9 @@ collectionLoop:
 			continue
 		}
 
-		if !hasCapability(decision.Capabilities, appmonitor.CapabilityApplicationMetrics) &&
-			!hasCapability(decision.Capabilities, appmonitor.CapabilityApplicationLogs) &&
-			!hasCapability(decision.Capabilities, appmonitor.CapabilityDatabaseMonitoring) {
+		if !hasCapability(capabilities, appmonitor.CapabilityApplicationMetrics) &&
+			!hasCapability(capabilities, appmonitor.CapabilityApplicationLogs) &&
+			!hasCapability(capabilities, appmonitor.CapabilityDatabaseMonitoring) {
 			a.logger.Info(
 				"Application collection skipped because the granted Bridge telemetry capabilities are unsupported",
 				"application_id", application.ApplicationID,
@@ -353,7 +358,7 @@ collectionLoop:
 				ctx,
 				application.Endpoint,
 				application.ApplicationCredential,
-				decision.Capabilities,
+				capabilities,
 				now,
 			)
 			record, err := a.applicationSpool.Append(
@@ -391,4 +396,14 @@ func hasApplicationMonitoringCapability(capabilities []string) bool {
 		hasCapability(capabilities, appmonitor.CapabilityDatabaseMonitoring) ||
 		hasCapability(capabilities, appmonitor.CapabilityQueueMonitoring) ||
 		hasCapability(capabilities, appmonitor.CapabilitySchedulerMonitoring)
+}
+
+func withoutCapability(capabilities []string, excluded string) []string {
+	filtered := make([]string, 0, len(capabilities))
+	for _, capability := range capabilities {
+		if capability != excluded {
+			filtered = append(filtered, capability)
+		}
+	}
+	return filtered
 }
