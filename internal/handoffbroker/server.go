@@ -346,6 +346,11 @@ func (s *Server) process(request Request) Response {
             return response
         }
 
+        if err := ensureMonotonicAssertion(mapping.ActivationStateFile, request); err != nil {
+            response.ErrorCode = "activation_state_stale"
+            return response
+        }
+
         if err := atomicWriteFile(
             mapping.ActivationStateFile,
             payload,
@@ -364,6 +369,83 @@ func (s *Server) process(request Request) Response {
         response.ErrorCode = "unsupported_operation"
         return response
     }
+}
+
+
+func ensureMonotonicAssertion(path string, request Request) error {
+    metadata, err := os.Lstat(path)
+    if errors.Is(err, os.ErrNotExist) {
+        return nil
+    }
+    if err != nil {
+        return err
+    }
+
+    if !metadata.Mode().IsRegular() || metadata.Mode()&os.ModeSymlink != 0 {
+        return errors.New("existing activation assertion is not a regular file")
+    }
+
+    stat, ok := metadata.Sys().(*syscall.Stat_t)
+    if !ok || stat.Uid != 0 || metadata.Mode().Perm()&0022 != 0 || metadata.Size() > MaximumRequestBytes {
+        return errors.New("existing activation assertion metadata is invalid")
+    }
+
+    descriptor, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+    if err != nil {
+        return err
+    }
+
+    assertionFile := os.NewFile(uintptr(descriptor), path)
+    defer assertionFile.Close()
+
+    openedMetadata, err := assertionFile.Stat()
+    if err != nil || !openedMetadata.Mode().IsRegular() {
+        return errors.New("existing activation assertion changed while opening")
+    }
+
+    openedStat, ok := openedMetadata.Sys().(*syscall.Stat_t)
+    if !ok || openedStat.Uid != 0 || openedStat.Dev != stat.Dev || openedStat.Ino != stat.Ino {
+        return errors.New("existing activation assertion identity changed while opening")
+    }
+
+    content, err := io.ReadAll(io.LimitReader(assertionFile, MaximumRequestBytes+1))
+    if err != nil || len(content) > MaximumRequestBytes {
+        return errors.New("existing activation assertion exceeds the size limit")
+    }
+
+    var previous struct {
+        ApplicationID  string `json:"application_id"`
+        ApplicationKey string `json:"application_key"`
+        ObservedAt     string `json:"observed_at"`
+    }
+
+    if err := json.Unmarshal(content, &previous); err != nil {
+        return errors.New("existing activation assertion is malformed")
+    }
+
+    if previous.ApplicationID != request.ApplicationID || previous.ApplicationKey != request.ApplicationKey {
+        return errors.New("existing activation assertion identity does not match the mapping")
+    }
+
+    return validateMonotonicObservation(previous.ObservedAt, request.ObservedAt)
+}
+
+func validateMonotonicObservation(previous string, next string) error {
+    previousTime, err := time.Parse(time.RFC3339, previous)
+    if err != nil {
+        return errors.New("existing activation observation timestamp is invalid")
+    }
+
+    nextTime, err := time.Parse(time.RFC3339, next)
+    if err != nil {
+        return errors.New("new activation observation timestamp is invalid")
+    }
+
+    if nextTime.Before(previousTime) {
+        return errors.New("activation assertion update is older than the existing assertion")
+    }
+
+    return nil
 }
 
 func validateActivationRequest(request Request, now time.Time) error {
