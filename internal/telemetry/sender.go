@@ -669,7 +669,6 @@ func sourceRecordKey(source Source) string {
 	return sourceEventKey(source) + "|" + source.Stream
 }
 
-
 func flattenFollowingDeliverySources(following []pendingBatch) []Source {
 	var sources []Source
 	for _, pending := range following {

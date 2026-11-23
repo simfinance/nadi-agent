@@ -735,7 +735,6 @@ func TestSplitDoesNotAcknowledgeSharedSpoolEventBeforeAllChildBatches(t *testing
 	}
 }
 
-
 func TestDiscardPendingQuarantinesEverySplitChildDurably(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.WriteHeader(http.StatusRequestEntityTooLarge)
