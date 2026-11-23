@@ -17,6 +17,7 @@ import (
 	"nadi-agent/internal/control"
 	"nadi-agent/internal/identity"
 	"nadi-agent/internal/logdedupe"
+	"nadi-agent/internal/nginxlogs"
 	"nadi-agent/internal/servermetrics"
 	"nadi-agent/internal/spool"
 	"nadi-agent/internal/state"
@@ -29,6 +30,7 @@ type App struct {
 	controlHTTP        *control.Client
 	serverMetrics      *servermetrics.Collector
 	applicationMetrics *appmonitor.Collector
+	nginxErrorLogs     *nginxlogs.Collector
 	telemetrySpool     *spool.Store
 	applicationSpool   *appspool.Store
 	telemetrySender    *telemetry.Sender
@@ -73,6 +75,16 @@ func (a *App) Run(ctx context.Context) error {
 		return fmt.Errorf("initialize durable log fingerprint state: %w", err)
 	}
 	a.logDedupe = logDedupe
+
+	nginxErrorLogs, err := nginxlogs.NewCollector(
+		a.config.NginxErrorLogPath,
+		nginxlogs.DefaultMaximumBytes,
+		nginxlogs.DefaultMaximumEntries,
+	)
+	if err != nil {
+		return fmt.Errorf("initialize Nginx error log collector: %w", err)
+	}
+	a.nginxErrorLogs = nginxErrorLogs
 
 	telemetrySender, err := telemetry.NewSender(
 		a.config.CentralURL,
@@ -235,6 +247,9 @@ func (a *App) runControlPoll(ctx context.Context, store *state.Store, agentState
 				} else {
 					a.serverMetrics.Reset()
 					a.logger.Debug("Server collection remains stopped while Runtime Activation Gate is closed; durable spool is retained")
+				}
+				if a.config.SystemLogTelemetryEnabled && serverStreamAllowed(gateDecisions, "nginx_error_logs") {
+					a.collectNginxErrorLogs(latestState)
 				}
 				if err := a.deliverTelemetry(ctx, latestState, serverMetricsAllowed, gateDecisions); err != nil {
 					if errors.Is(err, ErrControlPollRequired) {
