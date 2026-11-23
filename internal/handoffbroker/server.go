@@ -79,6 +79,10 @@ type Server struct {
 }
 
 func LoadConfig(path string) (Config, error) {
+    if err := ensureRootOwnedDirectory(filepath.Dir(path)); err != nil {
+        return Config{}, fmt.Errorf("broker mapping directory is unsafe: %w", err)
+    }
+
     metadata, err := os.Lstat(path)
     if err != nil {
         return Config{}, fmt.Errorf("inspect broker mapping file: %w", err)
@@ -93,9 +97,21 @@ func LoadConfig(path string) (Config, error) {
         return Config{}, errors.New("broker mapping file ownership, permissions, or size are invalid")
     }
 
-    content, err := os.ReadFile(path)
+    descriptor, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
     if err != nil {
-        return Config{}, fmt.Errorf("read broker mapping file: %w", err)
+        return Config{}, fmt.Errorf("open broker mapping file without following symlinks: %w", err)
+    }
+    mappingFile := os.NewFile(uintptr(descriptor), path)
+    defer mappingFile.Close()
+
+    openedMetadata, err := mappingFile.Stat()
+    if err != nil || !openedMetadata.Mode().IsRegular() || openedMetadata.Size() > MaximumRequestBytes {
+        return Config{}, errors.New("opened broker mapping file metadata is invalid")
+    }
+
+    content, err := io.ReadAll(io.LimitReader(mappingFile, MaximumRequestBytes+1))
+    if err != nil || len(content) > MaximumRequestBytes {
+        return Config{}, errors.New("broker mapping file could not be read within the size limit")
     }
 
     if err := rejectDuplicateJSONKeys(content); err != nil {
@@ -149,8 +165,17 @@ func (s *Server) ListenAndServe() error {
     }
 
     socketDirectory := filepath.Dir(s.socketPath)
-    if err := os.MkdirAll(socketDirectory, 0750); err != nil {
+    if err := ensureNoSymlinkPath("/run"); err != nil {
+        return err
+    }
+
+    if err := os.Mkdir(socketDirectory, 0750); err != nil && !errors.Is(err, os.ErrExist) {
         return fmt.Errorf("create broker socket directory: %w", err)
+    }
+
+    socketMetadata, err := os.Lstat(socketDirectory)
+    if err != nil || socketMetadata.Mode()&os.ModeSymlink != 0 || !socketMetadata.IsDir() {
+        return errors.New("broker socket directory is not a safe directory")
     }
 
     if err := os.Chown(socketDirectory, 0, int(s.config.AgentGID)); err != nil {
@@ -487,6 +512,11 @@ func ensureBridgeStateDirectory() error {
     directory := filepath.Join(parent, "bridge-state")
     if err := os.Mkdir(directory, 0711); err != nil && !errors.Is(err, os.ErrExist) {
         return fmt.Errorf("create Bridge activation state directory: %w", err)
+    }
+
+    metadata, err := os.Lstat(directory)
+    if err != nil || metadata.Mode()&os.ModeSymlink != 0 || !metadata.IsDir() {
+        return errors.New("Bridge activation state path is not a safe directory")
     }
 
     if err := os.Chown(directory, 0, 0); err != nil {
