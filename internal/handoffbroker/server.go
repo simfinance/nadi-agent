@@ -576,6 +576,49 @@ func decodeRequest(content []byte) (Request, error) {
         return Request{}, err
     }
 
+    var fields map[string]json.RawMessage
+    if err := json.Unmarshal(content, &fields); err != nil || fields == nil {
+        return Request{}, errors.New("request must be a JSON object")
+    }
+
+    operationBytes := fields["operation"]
+    var operation string
+    if err := json.Unmarshal(operationBytes, &operation); err != nil {
+        return Request{}, errors.New("request operation is required")
+    }
+
+    allowedFields := map[string]struct{}{
+        "protocol_version": {},
+        "operation": {},
+        "application_id": {},
+        "application_key": {},
+    }
+    switch operation {
+    case "publish_application_credential":
+        allowedFields["credential"] = struct{}{}
+    case "publish_activation_state":
+        allowedFields["activation_state"] = struct{}{}
+        allowedFields["monitoring_enabled"] = struct{}{}
+        allowedFields["grant_acknowledged"] = struct{}{}
+        allowedFields["capabilities"] = struct{}{}
+        allowedFields["observed_at"] = struct{}{}
+        allowedFields["valid_until"] = struct{}{}
+    default:
+        return Request{}, errors.New("request operation is not supported")
+    }
+
+    for field := range fields {
+        if _, allowed := allowedFields[field]; !allowed {
+            return Request{}, fmt.Errorf("field %q is not allowed for this operation", field)
+        }
+    }
+
+    for field := range allowedFields {
+        if _, exists := fields[field]; !exists {
+            return Request{}, fmt.Errorf("required request field %q is missing", field)
+        }
+    }
+
     decoder := json.NewDecoder(bytes.NewReader(content))
     decoder.DisallowUnknownFields()
 
