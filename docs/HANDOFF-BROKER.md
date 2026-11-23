@@ -26,7 +26,7 @@ The root-owned file `/etc/nadi-agent/bridge-mappings.json` uses schema version 1
             "base_path": "/srv/www/example",
             "runtime_uid": 33,
             "runtime_gid": 33,
-            "credential_file": "/srv/www/example/storage/app/private/nadi/credential",
+            "credential_file": "/var/lib/nadi-bridge/central-application-id/credential",
             "activation_state_file": "/run/nadi-agent/bridge-state/example.json"
         }
     ]
@@ -50,13 +50,24 @@ The broker preserves Central grant capability names. Bridge endpoint mapping is 
 - Socket: owner `root:nadi-agent`, mode `0660`.
 - Activation state directory: `/run/nadi-agent/bridge-state`, owner `root:root`, mode `0711`.
 - Activation assertion: owner `root:<Laravel runtime group>`, mode `0640`.
-- Credential parent directory: root-owned, not group/other writable, and provisioned so the Laravel runtime can traverse it (for example `root:<runtime group>` mode `0710`).
+- Credential parent directory: `/var/lib/nadi-bridge/<application_id>`, root-owned mode `0711`; the Laravel runtime can traverse but cannot replace the directory or list its contents.
 - Application credential: owner `<Laravel runtime user>:<Laravel runtime group>`, mode `0600`.
 
 The Laravel runtime can traverse the activation-state directory and read only its configured assertion file. It cannot list the directory or write assertions. The Agent can connect to the socket but cannot read the root-owned mapping file.
 
 ## Current limitations / install gate
 
-The base broker unit grants write access only to `/run/nadi-agent`. The privileged installer must add a root-owned systemd drop-in with `ReadWritePaths=` entries for the exact registered credential parent directories; it must never grant broad write access to `/srv` or another shared application root. This foundation does not yet include the privileged helper, root-owned mapping-file generation, application path canonicalization at install time, systemd drop-in generation/enablement, rollback, or end-to-end Agent/Bridge/broker tests. The service unit is a source artifact only and must not be installed manually yet.
+The base broker unit grants write access only to `/run/nadi-agent`. The privileged installer must add a root-owned systemd drop-in with `ReadWritePaths=` entries for the exact registered `/var/lib/nadi-bridge/<application_id>` credential directories; it must not grant broad write access to `/var/lib/nadi-bridge`, `/srv`, or another shared application root. This foundation does not yet include the privileged helper, root-owned mapping-file generation, application path canonicalization at install time, systemd drop-in generation/enablement, rollback, or end-to-end Agent/Bridge/broker tests. The service unit is a source artifact only and must not be installed manually yet.
 
 The installer must remain fail-closed. Do not deploy this broker or enable Bridge monitoring until the remaining installation and integration gates pass.
+
+
+## Credential path hardening checkpoint
+
+The broker mapping validator now rejects credential destinations inside Laravel application trees and accepts only:
+
+`/var/lib/nadi-bridge/{application_id}/credential`
+
+This prevents an application runtime user from replacing a credential file through a writable application parent directory. The broker systemd source unit must keep its base write scope limited to `/run/nadi-agent`; the future helper is responsible for generating an exact per-application `ReadWritePaths=` drop-in.
+
+**Integration dependency:** the current Laravel Bridge package configuration still defaults to `storage/app/private/nadi/credential`. Bridge must be changed to resolve the external path before this broker mapping can be used end-to-end. Until that is done, credential handoff is intentionally not production-ready.
