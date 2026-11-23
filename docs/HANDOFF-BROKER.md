@@ -57,6 +57,6 @@ The Laravel runtime can traverse the activation-state directory and read only it
 
 ## Current limitations / install gate
 
-This foundation does not yet include the privileged installer adapter, root-owned mapping-file generation, application path canonicalization at install time, systemd installation/enablement, rollback, or end-to-end Agent/Bridge/broker tests. The service unit is a source artifact only and must not be installed manually yet.
+The base broker unit grants write access only to `/run/nadi-agent`. The privileged installer must add a root-owned systemd drop-in with `ReadWritePaths=` entries for the exact registered credential parent directories; it must never grant broad write access to `/srv` or another shared application root. This foundation does not yet include the privileged helper, root-owned mapping-file generation, application path canonicalization at install time, systemd drop-in generation/enablement, rollback, or end-to-end Agent/Bridge/broker tests. The service unit is a source artifact only and must not be installed manually yet.
 
 The installer must remain fail-closed. Do not deploy this broker or enable Bridge monitoring until the remaining installation and integration gates pass.
