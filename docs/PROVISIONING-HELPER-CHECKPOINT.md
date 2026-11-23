@@ -35,9 +35,7 @@ The Go enrollment manifest already supports 1–20 applications in a single requ
 
 ## Existing Bridge request and mismatch
 
-The current Bridge `PrivilegedProvisioner` still sends a singular `application` object with one Laravel base path, one enrollment manifest, and one PHP-FPM UID/GID pair.
-
-That request shape cannot represent the confirmed Central model for a server hosting multiple Laravel applications. It must be replaced before the helper protocol is frozen.
+The Bridge PR branch now sends one enrollment manifest plus an `applications[]` mapping for all local Laravel applications. Its CI run #54 passed. The helper request parser validates the same multi-application contract.
 
 The target protocol must carry:
 
@@ -53,7 +51,7 @@ The helper must verify that every mapping record corresponds to exactly one appl
 
 The current Bridge preflight proceeds only when all discovered PHP-FPM pools resolve to the same non-root UID/GID pair. That logic is not sufficient for a multi-application host and must be replaced with per-application pool resolution.
 
-The broker stores each application credential as runtime_uid:runtime_gid with mode 0600. If multiple Laravel applications share the same PHP-FPM UID, a process compromised in one application may be able to read another application's credential file whenever the filesystem path is traversable. Mode 0600 does not isolate processes that share the file owner UID.
+The broker now requires each credential destination to be exactly `/var/lib/nadi-bridge/{application_id}/credential`, outside the Laravel application tree. It stores the credential as runtime_uid:runtime_gid with mode 0600. The root-owned parent directory is not writable by application users. If multiple Laravel applications share the same PHP-FPM UID, a process compromised in one application may be able to read another application's credential file whenever the filesystem path is traversable. Mode 0600 does not isolate processes that share the file owner UID.
 
 The provisioning implementation must not claim per-application OS-level credential isolation when UIDs are shared. The secure default is to require a distinct non-root runtime UID for each application whose credential must be isolated. If the deployment intentionally uses one shared PHP-FPM UID, that is a shared trust boundary and must not be presented as per-application isolation.
 
@@ -76,12 +74,19 @@ The Agent state contains Agent and per-application credentials. The helper and B
 
 The existing local handoff protocol uses a root-owned broker and kernel-authenticated Unix socket peer credentials. The broker mapping must be generated from the validated multi-application inventory. Credential publication does not open the Bridge activation gate; the signed Activation Grant and acknowledgement gate remains authoritative.
 
+## Latest work in this checkpoint
+
+- [x] Broker credential destinations are constrained to `/var/lib/nadi-bridge/{application_id}/credential`; writable Laravel application trees are rejected.
+- [x] Broker unit source has the fixed runtime directory boundary; the installer must add exact per-application credential-directory write paths rather than granting the whole Bridge data root.
+- [x] Broker tests cover rejection of application-tree destinations and acceptance of the fixed external destination.
+- [ ] Bridge runtime configuration still defaults to `storage/app/private/nadi/credential`; it must be updated to resolve the same external per-application path before end-to-end credential handoff can work.
+
 ## Current implementation gaps
 
 - [ ] Root-owned `nadi-provision` executable and strict request parser.
 - [x] Multi-application Bridge inventory configuration and per-application PHP-FPM pool identity resolution are implemented in the Bridge PR branch.
 - [x] Bridge-to-helper request contract now carries one enrollment manifest and an `applications` array; Bridge validation tests passed in workflow run #54.
-- [ ] Agent helper request parser and broker-mode changes must pass the current Go validation run.
+- [ ] Root-owned installation lifecycle, one-time enrollment invocation, summary reconciliation, exact systemd drop-in generation, and post-install verification.
 - [ ] Root-owned installation of Agent/broker binaries, trusted keys, systemd units, mapping, and exact write-path drop-ins.
 - [ ] Single enrollment invocation and summary-to-mapping reconciliation.
 - [ ] Safe partial-failure handling, post-install verification, and tests.
