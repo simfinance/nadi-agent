@@ -232,6 +232,7 @@ func (a *App) deliverTelemetry(
 		"Telemetry delivery disposition persisted; local spool records acknowledged",
 		"record_count", len(acknowledged),
 		"quarantined_count", quarantinedCount,
+		"quarantine_status_counts", quarantineStatuses,
 	)
 	return nil
 }
