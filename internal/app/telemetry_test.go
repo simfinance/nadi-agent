@@ -1,9 +1,13 @@
 package app
 
 import (
+	"encoding/json"
 	"testing"
+	"time"
 
 	"nadi-agent/internal/activation"
+	"nadi-agent/internal/appmonitor"
+	"nadi-agent/internal/appspool"
 )
 
 func TestApplicationTelemetryAllowed(t *testing.T) {
@@ -199,5 +203,81 @@ func TestServerStreamAllowedRequiresExactServerCapability(t *testing.T) {
 				t.Fatalf("serverStreamAllowed() = %t, want %t", actual, test.expected)
 			}
 		})
+	}
+}
+
+
+func TestBuildApplicationLogInputsMapsBridgeSummaryWithoutRawMessages(t *testing.T) {
+	applicationID := "11111111-1111-4111-8111-111111111111"
+	record := appspool.Record{
+		EventID:       "app-log-event",
+		ApplicationID: applicationID,
+		Timestamp:     time.Date(2026, 11, 23, 8, 0, 0, 0, time.UTC),
+		Payload: appmonitor.Snapshot{
+			Logs: appmonitor.EndpointResult{
+				Status: appmonitor.StatusAvailable,
+				Data: json.RawMessage(`{
+					"source":"laravel_application",
+					"entries":[{
+						"timestamp":"2026-11-23T08:00:00Z",
+						"level":"ERROR",
+						"exception_type":"RuntimeException",
+						"fingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+					}]
+				}`),
+			},
+		},
+	}
+
+	inputs, err := buildApplicationLogInputs(record)
+	if err != nil {
+		t.Fatalf("build application log telemetry: %v", err)
+	}
+	if len(inputs) != 1 {
+		t.Fatalf("expected one application log record, got %d", len(inputs))
+	}
+	if inputs[0].Stream != "application_logs" ||
+		inputs[0].ApplicationID == nil ||
+		*inputs[0].ApplicationID != applicationID {
+		t.Fatalf("application log scope or stream is incorrect: %#v", inputs[0])
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(inputs[0].Data, &payload); err != nil {
+		t.Fatalf("decode normalized application log: %v", err)
+	}
+	if payload["channel"] != "laravel_application" || payload["message"] != "Laravel exception: RuntimeException" {
+		t.Fatalf("unexpected normalized application log summary: %#v", payload)
+	}
+	contextFields, ok := payload["context"].(map[string]any)
+	if !ok || contextFields["fingerprint"] != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("Bridge fingerprint context was not preserved: %#v", payload["context"])
+	}
+}
+
+func TestBuildApplicationLogInputsRejectsInvalidBridgeSummary(t *testing.T) {
+	applicationID := "11111111-1111-4111-8111-111111111111"
+	record := appspool.Record{
+		EventID:       "app-log-event",
+		ApplicationID: applicationID,
+		Timestamp:     time.Now().UTC(),
+		Payload: appmonitor.Snapshot{
+			Logs: appmonitor.EndpointResult{
+				Status: appmonitor.StatusAvailable,
+				Data: json.RawMessage(`{
+					"source":"laravel_application",
+					"entries":[{
+						"timestamp":"2026-11-23T08:00:00Z",
+						"level":"ERROR",
+						"exception_type":"RuntimeException",
+						"fingerprint":"not-a-sha256-fingerprint"
+					}]
+				}`),
+			},
+		},
+	}
+
+	if _, err := buildApplicationLogInputs(record); err == nil {
+		t.Fatal("expected malformed Bridge fingerprint to be rejected")
 	}
 }
