@@ -32,7 +32,8 @@ var (
 	}
 
 	sensitiveAssignmentPattern = regexp.MustCompile(`(?i)\b(authorization|proxy-authorization|password|passwd|token|access[_-]?token|refresh[_-]?token|cookie|set-cookie|api[_-]?key|secret|credential|private[_-]?key)\b\s*[:=]\s*(?:bearer\s+)?("[^"]*"|'[^']*'|[^\s,;]+)`)
-	bearerTokenPattern         = regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/-]+=*`)
+	cookieHeaderPattern         = regexp.MustCompile(`(?i)\b(cookie|set-cookie)\b\s*[:=]\s*[^,]+`)
+	bearerTokenPattern          = regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/-]+=*`)
 	stackTracePattern          = regexp.MustCompile(`(?im)^\s*(?:at\s+[A-Za-z0-9_.$/<>-]+|goroutine\s+\d+\s+\[|#\d+\s+0x[0-9a-f]+)`)
 )
 
@@ -126,7 +127,7 @@ func NormalizeApplicationLog(raw []byte) (json.RawMessage, error) {
 		Channel:   channel,
 		Message:   message,
 	}
-	if len(input.Context) > 0 && string(input.Context) != "null" {
+	if len(input.Context) > 0 {
 		contextFields, err := normalizeContext(input.Context)
 		if err != nil {
 			return nil, err
@@ -182,6 +183,7 @@ func normalizeMessage(value string) (string, error) {
 		return "", errors.New("raw stack traces are not accepted in log telemetry")
 	}
 
+	message = cookieHeaderPattern.ReplaceAllString(message, "$1=[REDACTED]")
 	message = sensitiveAssignmentPattern.ReplaceAllString(message, "$1=[REDACTED]")
 	message = bearerTokenPattern.ReplaceAllString(message, "Bearer [REDACTED]")
 	message = strings.Join(strings.Fields(message), " ")
@@ -226,7 +228,10 @@ func normalizeContext(raw json.RawMessage) (map[string]any, error) {
 				return nil, errors.New("raw stack traces are not accepted in log context")
 			}
 			normalized[key] = bearerTokenPattern.ReplaceAllString(
-				sensitiveAssignmentPattern.ReplaceAllString(typed, "$1=[REDACTED]"),
+				sensitiveAssignmentPattern.ReplaceAllString(
+					cookieHeaderPattern.ReplaceAllString(typed, "$1=[REDACTED]"),
+					"$1=[REDACTED]",
+				),
 				"Bearer [REDACTED]",
 			)
 		case bool, json.Number, nil:
