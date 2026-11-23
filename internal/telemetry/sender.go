@@ -326,7 +326,8 @@ func (s *Sender) Complete() error {
 	next := pending.Following[0]
 	next.Following = append([]pendingBatch(nil), pending.Following[1:]...)
 	candidates := mergeSources(pending.CompletedSources, pending.Sources)
-	next.CompletedSources = sourcesStillPending(candidates, next.Following)
+	remaining := append([]pendingBatch{next}, next.Following...)
+	next.CompletedSources = sourcesStillPending(candidates, remaining)
 	return s.savePending(next)
 }
 
