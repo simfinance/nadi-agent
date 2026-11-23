@@ -170,7 +170,6 @@ func TestNormalizeApplicationLogRejectsChannelOverOneHundredBytes(t *testing.T) 
 	}
 }
 
-
 func TestNormalizeApplicationLogRejectsPHPAndPythonStackTraces(t *testing.T) {
 	messages := []string{
 		"Runtime failure\n#0 /var/www/app/Handler.php(42): App\\Service->run()\n#1 {main}",
