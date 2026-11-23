@@ -1,8 +1,6 @@
 package nginxlogs
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +18,7 @@ const (
 	DefaultMaximumEntries       = 100
 	MaximumAllowedBytes   int64 = 4 * 1024 * 1024
 	MaximumAllowedEntries       = 500
+	MaximumMessageBytes         = 8192
 )
 
 var (
@@ -27,8 +26,9 @@ var (
 	ipv4Pattern   = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
 	ipv6Pattern   = regexp.MustCompile(`(?i)\b[0-9a-f]{1,4}(?::[0-9a-f]{0,4}){2,}\b|::[0-9a-f]{1,4}(?::[0-9a-f]{0,4})*`)
 	quotedPattern = regexp.MustCompile(`"[^"]*"`)
-	secretPattern = regexp.MustCompile(`(?i)(token|access[_-]?token|refresh[_-]?token|password|passwd|secret|client[_-]?secret|authorization|proxy-authorization|api[_-]?key|private[_-]?key)\s*[:=]\s*(?:bearer\s+)?[^\s,;]+`)
+	secretPattern = regexp.MustCompile(`(?i)(authorization|proxy-authorization|password|passwd|token|access[_-]?token|refresh[_-]?token|secret|client[_-]?secret|api[_-]?key|private[_-]?key|credential)\s*[:=]\s*(?:bearer\s+)?[^\s,;]+`)
 	cookiePattern = regexp.MustCompile(`(?i)(cookie|set-cookie)\s*[:=]\s*[^,]+`)
+	bearerPattern = regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/-]+=*`)
 )
 
 type Status string
@@ -40,9 +40,10 @@ const (
 )
 
 type Entry struct {
-	Timestamp   time.Time `json:"timestamp"`
-	Level       string    `json:"level"`
-	Fingerprint string    `json:"fingerprint"`
+	Timestamp time.Time `json:"timestamp"`
+	Severity  string    `json:"severity"`
+	Message   string    `json:"message"`
+	Source    string    `json:"source,omitempty"`
 }
 
 type Snapshot struct {
@@ -202,9 +203,9 @@ func parseLine(line string) (Entry, bool) {
 		return Entry{}, false
 	}
 
-	level := matches[2]
-	switch level {
-	case "emerg", "alert", "crit", "error":
+	severity := matches[2]
+	switch severity {
+	case "emerg", "alert", "crit", "error", "warn", "notice", "info", "debug":
 	default:
 		return Entry{}, false
 	}
@@ -214,25 +215,37 @@ func parseLine(line string) (Entry, bool) {
 		return Entry{}, false
 	}
 
-	normalized := strings.ToLower(matches[3])
-	normalized = quotedPattern.ReplaceAllString(normalized, "<quoted>")
-	normalized = secretPattern.ReplaceAllString(normalized, "$1=<redacted>")
-	normalized = cookiePattern.ReplaceAllString(normalized, "$1=<redacted>")
-	normalized = ipv4Pattern.ReplaceAllString(normalized, "<ip>")
-	normalized = ipv6Pattern.ReplaceAllStringFunc(normalized, func(candidate string) string {
+	message := strings.TrimSpace(matches[3])
+	message = quotedPattern.ReplaceAllString(message, "<redacted>")
+	message = secretPattern.ReplaceAllString(message, "$1=<redacted>")
+	message = cookiePattern.ReplaceAllString(message, "$1=<redacted>")
+	message = bearerPattern.ReplaceAllString(message, "Bearer <redacted>")
+	message = ipv4Pattern.ReplaceAllString(message, "<ip>")
+	message = ipv6Pattern.ReplaceAllStringFunc(message, func(candidate string) string {
 		if net.ParseIP(candidate) != nil {
-			return "<address>"
+			return "<ip>"
 		}
-
 		return candidate
 	})
-	normalized = strings.Join(strings.Fields(normalized), " ")
-	digest := sha256.Sum256([]byte(level + "|" + normalized))
+	message = strings.Join(strings.Fields(message), " ")
+	if message == "" || len([]byte(message)) > MaximumMessageBytes {
+		return Entry{}, false
+	}
+
+	switch severity {
+	case "emerg":
+		severity = "emergency"
+	case "crit":
+		severity = "critical"
+	case "warn":
+		severity = "warning"
+	}
 
 	return Entry{
-		Timestamp:   timestamp.UTC(),
-		Level:       level,
-		Fingerprint: hex.EncodeToString(digest[:]),
+		Timestamp: timestamp.UTC(),
+		Severity:  severity,
+		Message:   message,
+		Source:    "nginx",
 	}, true
 }
 
