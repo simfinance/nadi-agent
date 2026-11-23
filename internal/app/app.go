@@ -369,6 +369,30 @@ collectionLoop:
 				capabilities,
 				now,
 			)
+			var logFingerprints []string
+			if a.config.LogTelemetryEnabled &&
+				hasCapability(capabilities, appmonitor.CapabilityApplicationLogs) &&
+				snapshot.Logs.Status == appmonitor.StatusAvailable &&
+				len(snapshot.Logs.Data) > 0 {
+				filtered, fingerprints, filterErr := filterApplicationLogSummary(
+					a.logDedupe,
+					application.ApplicationID,
+					snapshot.Logs.Data,
+				)
+				if filterErr != nil {
+					a.logger.Warn(
+						"Bridge application log summary could not be deduplicated; log telemetry skipped for this poll",
+						"application_id", application.ApplicationID,
+						"error", filterErr,
+					)
+					snapshot.Logs.Status = appmonitor.StatusUnavailable
+					snapshot.Logs.ErrorCode = "log_fingerprint_filter_failed"
+					snapshot.Logs.Data = nil
+				} else {
+					snapshot.Logs.Data = filtered
+					logFingerprints = fingerprints
+				}
+			}
 			record, err := a.applicationSpool.Append(
 				agentState.CentralServerID,
 				agentState.CentralAgentID,
@@ -378,6 +402,15 @@ collectionLoop:
 			if err != nil {
 				a.logger.Error("Application metrics could not be persisted to the isolated spool", "application_id", application.ApplicationID, "error", err)
 				return
+			}
+			if len(logFingerprints) > 0 {
+				if err := a.logDedupe.Commit("application:"+application.ApplicationID, logFingerprints); err != nil {
+					a.logger.Error(
+						"Application log fingerprints could not be persisted after the spool append; duplicate summaries may be collected again",
+						"application_id", application.ApplicationID,
+						"error", err,
+					)
+				}
 			}
 
 			a.logger.Info(
