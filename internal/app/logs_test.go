@@ -29,6 +29,14 @@ func TestFilterApplicationLogSummaryDeduplicatesPerApplication(t *testing.T) {
 		t.Fatalf("expected two new fingerprints, got %#v", fingerprints)
 	}
 
+	var firstPayload applicationLogSummaryPayload
+	if err := json.Unmarshal(filtered, &firstPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(firstPayload.Entries) != 2 {
+		t.Fatalf("expected both new log entries to be retained, got %d", len(firstPayload.Entries))
+	}
+
 	if err := store.Commit("application:app-a", fingerprints); err != nil {
 		t.Fatal(err)
 	}
