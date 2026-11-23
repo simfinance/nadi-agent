@@ -104,7 +104,7 @@ func TestNormalizeApplicationLogRejectsUnknownFieldsAndInvalidContext(t *testing
 		"null context":            `{` + base + `,"context":null}`,
 		"array context":           `{` + base + `,"context":[]}`,
 		"nested context":          `{` + base + `,"context":{"nested":{"value":1}}}`,
-		"null context value":       `{` + base + `,"context":{"value":null}}`,
+		"null context value":      `{` + base + `,"context":{"value":null}}`,
 		"stack trace key":         `{` + base + `,"context":{"stack_trace":"secret"}}`,
 		"stack trace value":       `{` + base + `,"context":{"detail":" at App.Service.Runner"}}`,
 	}
