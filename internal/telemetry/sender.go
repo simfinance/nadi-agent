@@ -393,83 +393,110 @@ func (s *Sender) buildPending(instanceID string, inputs []InputRecord) (*pending
 	sources := make([]Source, 0, cap(batch.Records))
 	scopeKey := ""
 
-	for index, input := range inputs {
-		if index >= MaximumBatchRecords {
-			break
+	for index := 0; index < len(inputs); {
+		first := inputs[index]
+		groupKey := inputSourceKey(first.Source)
+		groupEnd := index + 1
+		for groupEnd < len(inputs) && inputSourceKey(inputs[groupEnd].Source) == groupKey {
+			groupEnd++
 		}
-		if _, supported := RequiredCapability(input.Stream); !supported {
-			return nil, fmt.Errorf("unsupported Central telemetry stream %q", input.Stream)
-		}
-		if len(input.Data) == 0 || !json.Valid(input.Data) {
-			return nil, errors.New("telemetry input contains invalid data JSON")
-		}
-		if input.MetricSet != nil && len(*input.MetricSet) > 100 {
-			return nil, errors.New("telemetry metric_set exceeds 100 characters")
-		}
-		if input.Source.EventID == "" {
-			return nil, errors.New("telemetry source event_id must not be empty")
-		}
+		group := inputs[index:groupEnd]
 
-		currentScope := "server"
-		if IsServerStream(input.Stream) {
-			if input.ApplicationID != nil {
-				return nil, fmt.Errorf("server stream %s must not contain application_id", input.Stream)
-			}
-			if input.Source.Kind != "server" || input.Source.ApplicationID != "" {
-				return nil, fmt.Errorf("server stream %s has an invalid local source scope", input.Stream)
-			}
-		} else {
-			if input.ApplicationID == nil || !uuidPattern.MatchString(*input.ApplicationID) {
-				return nil, fmt.Errorf("application stream %s requires a valid application_id UUID", input.Stream)
-			}
-			if input.Source.Kind != "application" || input.Source.ApplicationID != *input.ApplicationID {
-				return nil, fmt.Errorf("application stream %s source does not match application_id", input.Stream)
-			}
-			currentScope = *input.ApplicationID
+		groupScope := "server"
+		if first.ApplicationID != nil {
+			groupScope = *first.ApplicationID
 		}
-
 		if scopeKey == "" {
-			scopeKey = currentScope
-		} else if scopeKey != currentScope {
+			scopeKey = groupScope
+		} else if scopeKey != groupScope {
+			break
+		}
+		if len(batch.Records)+len(group) > MaximumBatchRecords {
+			if len(batch.Records) == 0 {
+				return nil, fmt.Errorf("one source event contains more than %d telemetry records", MaximumBatchRecords)
+			}
 			break
 		}
 
-		sequenceKey := currentScope + "|" + input.Stream
-		nextSequence := sequences.Values[sequenceKey] + 1
-		observedAt := input.ObservedAt.UTC()
-		collectedAt := input.CollectedAt.UTC()
-		if observedAt.IsZero() {
-			observedAt = collectedAt
+		nextSequences := sequenceState{
+			Values: make(map[string]uint64, len(sequences.Values)),
 		}
-		if collectedAt.IsZero() {
-			collectedAt = time.Now().UTC()
+		for key, value := range sequences.Values {
+			nextSequences.Values[key] = value
 		}
 
-		recordID, err := newUUID()
-		if err != nil {
-			return nil, err
-		}
-		record := Record{
-			RecordID:      recordID,
-			Stream:        input.Stream,
-			Sequence:      nextSequence,
-			ObservedAt:    observedAt,
-			CollectedAt:   collectedAt,
-			ApplicationID: input.ApplicationID,
-			MetricSet:     input.MetricSet,
-			Data:          append(json.RawMessage(nil), input.Data...),
-		}
+		groupRecords := make([]Record, 0, len(group))
+		groupSources := make([]Source, 0, len(group))
+		for _, input := range group {
+			if _, supported := RequiredCapability(input.Stream); !supported {
+				return nil, fmt.Errorf("unsupported Central telemetry stream %q", input.Stream)
+			}
+			if len(input.Data) == 0 || !json.Valid(input.Data) {
+				return nil, errors.New("telemetry input contains invalid data JSON")
+			}
+			if input.MetricSet != nil && len(*input.MetricSet) > 100 {
+				return nil, errors.New("telemetry metric_set exceeds 100 characters")
+			}
+			if input.Source.EventID == "" || input.Source.Kind == "" {
+				return nil, errors.New("telemetry source kind and event_id are required")
+			}
 
-		encodedRecord, err := json.Marshal(record)
-		if err != nil {
-			return nil, fmt.Errorf("encode telemetry record: %w", err)
-		}
-		if len(encodedRecord) > MaximumRecordBytes && len(batch.Records) > 0 {
-			break
+			currentScope := "server"
+			if IsServerStream(input.Stream) {
+				if input.ApplicationID != nil {
+					return nil, fmt.Errorf("server stream %s must not contain application_id", input.Stream)
+				}
+				if input.Source.Kind != "server" || input.Source.ApplicationID != "" {
+					return nil, fmt.Errorf("server stream %s has an invalid local source scope", input.Stream)
+				}
+			} else {
+				if input.ApplicationID == nil || !uuidPattern.MatchString(*input.ApplicationID) {
+					return nil, fmt.Errorf("application stream %s requires a valid application_id UUID", input.Stream)
+				}
+				if input.Source.Kind != "application" || input.Source.ApplicationID != *input.ApplicationID {
+					return nil, fmt.Errorf("application stream %s source does not match application_id", input.Stream)
+				}
+				currentScope = *input.ApplicationID
+			}
+			if currentScope != groupScope {
+				return nil, errors.New("one source event cannot span telemetry scopes")
+			}
+
+			sequenceKey := currentScope + "|" + input.Stream
+			nextSequence := nextSequences.Values[sequenceKey] + 1
+			observedAt := input.ObservedAt.UTC()
+			collectedAt := input.CollectedAt.UTC()
+			if observedAt.IsZero() {
+				observedAt = collectedAt
+			}
+			if collectedAt.IsZero() {
+				collectedAt = time.Now().UTC()
+			}
+
+			recordID, err := newUUID()
+			if err != nil {
+				return nil, err
+			}
+			record := Record{
+				RecordID:      recordID,
+				Stream:        input.Stream,
+				Sequence:      nextSequence,
+				ObservedAt:    observedAt,
+				CollectedAt:   collectedAt,
+				ApplicationID: input.ApplicationID,
+				MetricSet:     input.MetricSet,
+				Data:          append(json.RawMessage(nil), input.Data...),
+			}
+
+			groupRecords = append(groupRecords, record)
+			source := input.Source
+			source.Stream = input.Stream
+			groupSources = append(groupSources, source)
+			nextSequences.Values[sequenceKey] = nextSequence
 		}
 
 		candidate := batch
-		candidate.Records = append(append([]Record(nil), batch.Records...), record)
+		candidate.Records = append(append([]Record(nil), batch.Records...), groupRecords...)
 		encodedBatch, err := json.Marshal(candidate)
 		if err != nil {
 			return nil, fmt.Errorf("encode telemetry batch: %w", err)
@@ -479,12 +506,11 @@ func (s *Sender) buildPending(instanceID string, inputs []InputRecord) (*pending
 		}
 
 		batch.Records = candidate.Records
-		source := input.Source
-		source.Stream = input.Stream
-		sources = append(sources, source)
-		sequences.Values[sequenceKey] = nextSequence
+		sources = append(sources, groupSources...)
+		sequences = nextSequences
+		index = groupEnd
 
-		if len(encodedRecord) > MaximumRecordBytes || len(encodedBatch) > MaximumBatchBytes {
+		if len(batch.Records) >= MaximumBatchRecords || len(encodedBatch) > MaximumBatchBytes {
 			break
 		}
 	}
@@ -498,316 +524,8 @@ func (s *Sender) buildPending(instanceID string, inputs []InputRecord) (*pending
 	return &pendingBatch{Batch: batch, Sources: sources}, nil
 }
 
-func (s *Sender) splitPending(pending pendingBatch) error {
-	middle := len(pending.Batch.Records) / 2
-	if middle <= 0 || middle >= len(pending.Batch.Records) {
-		return errors.New("telemetry batch cannot be split")
-	}
-
-	leftID, err := newUUID()
-	if err != nil {
-		return err
-	}
-	rightID, err := newUUID()
-	if err != nil {
-		return err
-	}
-
-	left := pendingBatch{
-		CompletedSources: append([]Source(nil), pending.CompletedSources...),
-		Batch: Batch{
-			ProtocolVersion: pending.Batch.ProtocolVersion,
-			BatchID:         leftID,
-			AgentInstanceID: pending.Batch.AgentInstanceID,
-			SentAt:          time.Now().UTC(),
-			Records:         append([]Record(nil), pending.Batch.Records[:middle]...),
-		},
-		Sources: append([]Source(nil), pending.Sources[:middle]...),
-	}
-	right := pendingBatch{
-		Batch: Batch{
-			ProtocolVersion: pending.Batch.ProtocolVersion,
-			BatchID:         rightID,
-			AgentInstanceID: pending.Batch.AgentInstanceID,
-			SentAt:          time.Now().UTC(),
-			Records:         append([]Record(nil), pending.Batch.Records[middle:]...),
-		},
-		Sources: append([]Source(nil), pending.Sources[middle:]...),
-	}
-	left.Following = append([]pendingBatch{right}, pending.Following...)
-	return s.savePending(left)
-}
-
-func (s *Sender) quarantinePending(statusCode int, reason string) error {
-	pending, err := s.loadPending()
-	if err != nil {
-		return err
-	}
-	if pending == nil {
-		return nil
-	}
-
-	quarantinedSources := markQuarantined(pending.Sources, statusCode)
-	entryPending := *pending
-	entryPending.Sources = quarantinedSources
-	entryPending.Following = nil
-	entry := QuarantineEntry{
-		QuarantinedAt: time.Now().UTC(),
-		StatusCode:    statusCode,
-		Reason:        reason,
-		Pending:       entryPending,
-	}
-	if err := s.appendQuarantine(entry); err != nil {
-		return err
-	}
-
-	pending.Sources = quarantinedSources
-	return s.savePending(*pending)
-}
-
-func (s *Sender) appendQuarantine(entry QuarantineEntry) error {
-	content, err := json.Marshal(entry)
-	if err != nil {
-		return fmt.Errorf("encode telemetry quarantine entry: %w", err)
-	}
-	content = append(content, '\n')
-
-	path := filepath.Join(s.dir, "quarantine.ndjson")
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-	if err != nil {
-		return fmt.Errorf("open telemetry quarantine file: %w", err)
-	}
-	if err := file.Chmod(0600); err != nil {
-		file.Close()
-		return fmt.Errorf("secure telemetry quarantine file: %w", err)
-	}
-	if _, err := file.Write(content); err != nil {
-		file.Close()
-		return fmt.Errorf("write telemetry quarantine entry: %w", err)
-	}
-	if err := file.Sync(); err != nil {
-		file.Close()
-		return fmt.Errorf("sync telemetry quarantine entry: %w", err)
-	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("close telemetry quarantine file: %w", err)
-	}
-	if err := syncDirectory(s.dir); err != nil {
-		return fmt.Errorf("sync telemetry quarantine directory: %w", err)
-	}
-	return nil
-}
-
-func flattenPendingBatches(pending pendingBatch) []pendingBatch {
-	current := pending
-	current.Following = nil
-	result := []pendingBatch{current}
-	for _, following := range pending.Following {
-		result = append(result, flattenPendingBatches(following)...)
-	}
-	return result
-}
-
-func (s *Sender) acknowledgedSourcesOrAdvance(pending *pendingBatch) ([]Source, error) {
-	sources := acknowledgeableSources(
-		mergeSources(pending.CompletedSources, pending.Sources),
-		pending.Following,
-	)
-	if len(sources) == 0 && len(pending.Following) > 0 {
-		if err := s.Complete(); err != nil {
-			return nil, fmt.Errorf("advance acknowledged split batch: %w", err)
-		}
-		return nil, nil
-	}
-	return sources, nil
-}
-
-func (s *Sender) quarantinedSourcesOrAdvance(pending *pendingBatch, statusCode int) ([]Source, error) {
-	if err := s.quarantinePending(statusCode, fmt.Sprintf("Central rejected telemetry with HTTP %d", statusCode)); err != nil {
-		return nil, fmt.Errorf("persist telemetry quarantine: %w", err)
-	}
-
-	updated, err := s.loadPending()
-	if err != nil {
-		return nil, err
-	}
-	if updated == nil {
-		return nil, errors.New("quarantined telemetry pending state disappeared")
-	}
-
-	sources := acknowledgeableSources(
-		mergeSources(updated.CompletedSources, updated.Sources),
-		updated.Following,
-	)
-	if len(sources) == 0 && len(updated.Following) > 0 {
-		if err := s.Complete(); err != nil {
-			return nil, fmt.Errorf("advance quarantined split batch: %w", err)
-		}
-		if statusCode == http.StatusGone {
-			return nil, &HTTPStatusError{StatusCode: statusCode, Message: "scope rejected; Control Poll must refresh"}
-		}
-		return nil, nil
-	}
-	return sources, nil
-}
-
-func flattenFollowingSources(following []pendingBatch) []Source {
-	var sources []Source
-	for _, pending := range following {
-		sources = mergeSources(sources, pending.CompletedSources)
-		sources = mergeSources(sources, pending.Sources)
-		sources = mergeSources(sources, flattenFollowingSources(pending.Following))
-	}
-	return sources
-}
-
-func sourceEventKey(source Source) string {
+func inputSourceKey(source Source) string {
 	return source.Kind + "|" + source.ApplicationID + "|" + source.EventID
-}
-
-func sourceRecordKey(source Source) string {
-	return sourceEventKey(source) + "|" + source.Stream
-}
-
-func flattenFollowingDeliverySources(following []pendingBatch) []Source {
-	var sources []Source
-	for _, pending := range following {
-		sources = mergeSources(sources, pending.Sources)
-		sources = mergeSources(sources, flattenFollowingDeliverySources(pending.Following))
-	}
-	return sources
-}
-
-func mergeSources(groups ...[]Source) []Source {
-	merged := make([]Source, 0)
-	indices := make(map[string]int)
-	for _, group := range groups {
-		for _, source := range group {
-			key := sourceRecordKey(source)
-			if index, found := indices[key]; found {
-				if source.Quarantined {
-					merged[index].Quarantined = true
-					merged[index].QuarantineStatus = source.QuarantineStatus
-				}
-				continue
-			}
-			indices[key] = len(merged)
-			merged = append(merged, source)
-		}
-	}
-	return merged
-}
-
-func sourcesStillPending(candidates []Source, following []pendingBatch) []Source {
-	if len(candidates) == 0 {
-		return nil
-	}
-	future := make(map[string]struct{})
-	addSourcesToSet(future, flattenFollowingSources(following))
-
-	result := make([]Source, 0, len(candidates))
-	for _, source := range candidates {
-		if _, found := future[sourceEventKey(source)]; found {
-			result = append(result, source)
-		}
-	}
-	return mergeSources(result)
-}
-
-func acknowledgeableSources(candidates []Source, following []pendingBatch) []Source {
-	if len(candidates) == 0 {
-		return nil
-	}
-	future := make(map[string]struct{})
-	addSourcesToSet(future, flattenFollowingSources(following))
-
-	result := make([]Source, 0, len(candidates))
-	for _, source := range candidates {
-		if _, found := future[sourceEventKey(source)]; !found {
-			result = append(result, source)
-		}
-	}
-	return mergeAcknowledgedSources(result)
-}
-
-func mergeAcknowledgedSources(sources []Source) []Source {
-	merged := make([]Source, 0)
-	indices := make(map[string]int)
-	for _, source := range sources {
-		key := sourceEventKey(source)
-		if index, found := indices[key]; found {
-			if source.Quarantined {
-				merged[index].Quarantined = true
-				merged[index].QuarantineStatus = source.QuarantineStatus
-			}
-			continue
-		}
-		indices[key] = len(merged)
-		merged = append(merged, source)
-	}
-	return merged
-}
-
-func addSourcesToSet(target map[string]struct{}, sources []Source) {
-	for _, source := range sources {
-		target[sourceEventKey(source)] = struct{}{}
-	}
-}
-
-func markQuarantined(sources []Source, statusCode int) []Source {
-	result := append([]Source(nil), sources...)
-	for index := range result {
-		result[index].Quarantined = true
-		result[index].QuarantineStatus = statusCode
-	}
-	return result
-}
-
-func exponentialBackoff(attempt int) time.Duration {
-	delay := time.Second * time.Duration(1<<attempt)
-	if delay > 30*time.Second {
-		delay = 30 * time.Second
-	}
-	return time.Duration(float64(delay) * (0.5 + mathrand.Float64()))
-}
-
-func parseRetryAfter(value string, now time.Time) time.Duration {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return 0
-	}
-	if seconds, err := strconv.Atoi(value); err == nil && seconds >= 0 {
-		delay := time.Duration(seconds) * time.Second
-		if delay > 5*time.Minute {
-			return 5 * time.Minute
-		}
-		return delay
-	}
-	if parsed, err := http.ParseTime(value); err == nil {
-		delay := parsed.Sub(now)
-		if delay < 0 {
-			return 0
-		}
-		if delay > 5*time.Minute {
-			return 5 * time.Minute
-		}
-		return delay
-	}
-	return 0
-}
-
-func waitRetry(ctx context.Context, delay time.Duration) error {
-	if delay <= 0 {
-		return nil
-	}
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
 }
 
 func (s *Sender) loadPending() (*pendingBatch, error) {
