@@ -171,49 +171,47 @@ func TestProvisionJournalRollbackAllowlistAcceptsExactManagedRoot(t *testing.T) 
 	}
 }
 
-
 func TestProvisionJournalRejectsRollbackAfterCommit(t *testing.T) {
-    directory := t.TempDir()
-    store, journal, err := newProvisionJournal(filepath.Join(directory, "journal.json"))
-    if err != nil {
-        t.Fatal(err)
-    }
-    if err := store.Commit(&journal); err != nil {
-        t.Fatal(err)
-    }
-    if err := store.Rollback(&journal, []string{directory}); err == nil {
-        t.Fatal("committed provisioning journal must not be rolled back")
-    }
+	directory := t.TempDir()
+	store, journal, err := newProvisionJournal(filepath.Join(directory, "journal.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Commit(&journal); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Rollback(&journal, []string{directory}); err == nil {
+		t.Fatal("committed provisioning journal must not be rolled back")
+	}
 }
 
 func TestProvisionJournalRejectsCommitAfterRollback(t *testing.T) {
-    directory := t.TempDir()
-    store, journal, err := newProvisionJournal(filepath.Join(directory, "journal.json"))
-    if err != nil {
-        t.Fatal(err)
-    }
-    if err := store.Rollback(&journal, []string{directory}); err != nil {
-        t.Fatal(err)
-    }
-    if err := store.Commit(&journal); err == nil {
-        t.Fatal("rolled-back provisioning journal must not be committed")
-    }
+	directory := t.TempDir()
+	store, journal, err := newProvisionJournal(filepath.Join(directory, "journal.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Rollback(&journal, []string{directory}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Commit(&journal); err == nil {
+		t.Fatal("rolled-back provisioning journal must not be committed")
+	}
 }
 
-
 func TestProvisionJournalRejectsSymlinkedResourceParent(t *testing.T) {
-    directory := t.TempDir()
-    targetDirectory := filepath.Join(directory, "target")
-    if err := os.Mkdir(targetDirectory, 0700); err != nil {
-        t.Fatal(err)
-    }
-    linkedDirectory := filepath.Join(directory, "linked")
-    if err := os.Symlink(targetDirectory, linkedDirectory); err != nil {
-        t.Fatal(err)
-    }
+	directory := t.TempDir()
+	targetDirectory := filepath.Join(directory, "target")
+	if err := os.Mkdir(targetDirectory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	linkedDirectory := filepath.Join(directory, "linked")
+	if err := os.Symlink(targetDirectory, linkedDirectory); err != nil {
+		t.Fatal(err)
+	}
 
-    path := filepath.Join(linkedDirectory, "resource")
-    if _, err := fingerprintProvisionResource("file", path); err == nil {
-        t.Fatal("resource with a symlinked parent directory must be rejected")
-    }
+	path := filepath.Join(linkedDirectory, "resource")
+	if _, err := fingerprintProvisionResource("file", path); err == nil {
+		t.Fatal("resource with a symlinked parent directory must be rejected")
+	}
 }
