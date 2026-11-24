@@ -378,7 +378,7 @@ func verifyExistingEnrollmentIdentity(
 	if err != nil {
 		return err
 	}
-	_, _, _, err = BuildBrokerArtifacts(
+	_, expectedMapping, expectedDropIn, err := BuildBrokerArtifacts(
 		uint32(identity.uid),
 		uint32(identity.gid),
 		ProvisionRequest{Applications: applications},
@@ -386,6 +386,15 @@ func verifyExistingEnrollmentIdentity(
 	)
 	if err != nil {
 		return fmt.Errorf("verify existing enrollment application identity: %w", err)
+	}
+
+	installedMapping, err := readRootOwnedRegularFile(brokerMappingPath, 64*1024)
+	if err != nil || !bytes.Equal(installedMapping, expectedMapping) {
+		return errors.New("installed Bridge mapping does not match the verified Agent identity")
+	}
+	installedDropIn, err := readRootOwnedRegularFile(brokerDropInPath, 64*1024)
+	if err != nil || string(installedDropIn) != expectedDropIn {
+		return errors.New("installed Bridge service permissions do not match the verified Agent identity")
 	}
 
 	return nil
@@ -735,6 +744,12 @@ func runStartAgentOperation(response HelperResponse, writer io.Writer, errorWrit
 	response.AgentVersion = completion.AgentVersion
 	response.ApplicationCount = completion.ApplicationCount
 
+	if err := verifyExistingEnrollmentIdentity(inventory.Applications, inventory.ArtifactSHA256); err != nil {
+		response.Phase = "recovery_required"
+		response.EnrollmentStatus = "unknown"
+		response.RetrySafe = false
+		return writeOperationFailure(writer, errorWriter, response, fmt.Errorf("Agent identity verification failed before service activation: %w", err))
+	}
 	if err := verifyAgentStateFile(); err != nil {
 		return writeOperationFailure(writer, errorWriter, response, err)
 	}
