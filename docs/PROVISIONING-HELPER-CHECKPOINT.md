@@ -121,14 +121,15 @@ The new code is in `internal/provision/broker_artifacts.go` and `internal/provis
 
 Files: `internal/provision/broker_artifact_install.go` and `internal/provision/broker_artifact_install_test.go`.
 
-## Architecture path alignment blocker found on specification re-review
+## Canonical filesystem layout decision and migration
 
-The Master Architecture Technical Specification v1.0 section 10.4 lists these baseline directories:
-`/opt/nadi`, `/etc/nadi`, `/var/lib/nadi`, `/var/log/nadi`, and `/run/nadi`.
+ADR-0001 records the accepted decision to use the five baseline directories from Master Architecture section 10.4: `/opt/nadi`, `/etc/nadi`, `/var/lib/nadi`, `/var/log/nadi`, and `/run/nadi`. The Bridge credential root `/var/lib/nadi-bridge/{application_id}` remains a separate per-application security boundary.
 
-The current Agent implementation and systemd assets use Agent-specific paths such as `/opt/nadi-agent`, `/etc/nadi-agent`, `/var/lib/nadi-agent`, and `/run/nadi-agent`. The Agent-side specification does not explicitly resolve this directory naming difference.
+The Agent implementation, broker mapping, activation-state destination, socket, systemd units, embedded unit assets, and their tests have now been migrated from the former `/etc/nadi-agent`, `/var/lib/nadi-agent`, and `/run/nadi-agent` paths to the canonical layout. `/opt/nadi/bin/nadi-agent` was already canonical and remains unchanged.
 
-This must be resolved as an explicit architecture/path decision before completing the root provisioning helper. Do not silently rename existing paths or write a helper that makes the divergence permanent. The Bridge credential root `/var/lib/nadi-bridge/{application_id}` is a separate security boundary and is not replaced by the Agent state directory.
+The Laravel Bridge config no longer defaults credentials into Laravel storage. `NADI_CREDENTIAL_FILE` and `NADI_ACTIVATION_STATE_FILE` are installer-managed environment values and default to null, preserving fail-closed behavior until provisioning supplies the per-application paths. The packaged Agent unit and Bridge handoff documentation use the canonical locations.
+
+This source migration is not a production migration. No existing host state was moved, no services were restarted, and no Central repository changes were made. Installer directory creation, ownership/mode validation, and a safe restore/migration policy remain required.
 
 ## Current implementation gaps
 
