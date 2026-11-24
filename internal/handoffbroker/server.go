@@ -606,7 +606,7 @@ func ensureNoSymlinkPath(path string) error {
 }
 
 func ensureBridgeStateDirectory() error {
-	parent := "/run/nadi-agent"
+	parent := "/run/nadi"
 	if err := ensureRootOwnedDirectory(parent); err != nil {
 		return err
 	}
