@@ -48,7 +48,7 @@ The helper must create the journal before the first reversible filesystem mutati
 - [x] `install_agent` records directory and file creation intent before mutation, then records a device/inode/owner/group/mode fingerprint and SHA-256 for files after successful creation.
 - [x] Fresh-install failure invokes reverse-order rollback. Files are removed only when their current fingerprint still matches; directories are removed only when their fingerprint matches and they are empty.
 - [x] A resource with an intent but no verified post-operation fingerprint is preserved and reported as `recovery_required`.
-- [x] The fixed `nadi-agent` account is explicitly retained; the helper does not attempt to delete an account that may predate the transaction or be in use.
+- [x] The fixed `nadi-agent` service identity (system group and account) is explicitly retained; the helper does not attempt to delete an identity that may predate the transaction or be in use.
 - [x] Existing directories with mismatched ownership or mode are rejected instead of silently chmodded by the journal-aware fresh-install path.
 - [x] A stale in-progress journal is rolled back before a new fresh install. A committed journal is accepted only when the root-owned inventory matches the signed release and requested application inventory.
 - [x] All three privileged helper operations are serialized with an exclusive, root-owned mode-0600 lock at `/etc/.nadi-provisioning.lock`; concurrent invocations fail closed.
