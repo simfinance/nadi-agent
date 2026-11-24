@@ -75,11 +75,43 @@ func DecodeProvisionOperationRequest(reader io.Reader) (ProvisionOperationReques
 	if err := ensureJSONEOF(decoder); err != nil {
 		return ProvisionOperationRequest{}, fmt.Errorf("provisioning request has trailing data: %w", err)
 	}
+	if err := validateProvisionOperationFieldSet(content, request.Operation); err != nil {
+		return ProvisionOperationRequest{}, err
+	}
 	if err := validateProvisionOperationRequest(request); err != nil {
 		return ProvisionOperationRequest{}, err
 	}
 
 	return request, nil
+}
+
+func validateProvisionOperationFieldSet(content []byte, operation string) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(content, &fields); err != nil {
+		return errors.New("provisioning request must be a JSON object")
+	}
+
+	allowed := map[string]struct{}{
+		"protocol_version": {},
+		"operation":        {},
+	}
+	switch operation {
+	case "install_agent":
+		allowed["release"] = struct{}{}
+		allowed["applications"] = struct{}{}
+	case "enroll_agent":
+		allowed["enrollment"] = struct{}{}
+	case "start_agent":
+	default:
+		return errors.New("unsupported provisioning operation")
+	}
+
+	for field := range fields {
+		if _, exists := allowed[field]; !exists {
+			return fmt.Errorf("field %q is not allowed for operation %q", field, operation)
+		}
+	}
+	return nil
 }
 
 func validateProvisionOperationRequest(request ProvisionOperationRequest) error {
@@ -280,6 +312,13 @@ func runEnrollAgentOperation(request ProvisionOperationRequest, response HelperR
 	response.AgentVersion = inventory.AgentVersion
 
 	if completion, completionErr := readProvisionCompletion(); completionErr == nil {
+		if completion.AgentVersion != inventory.AgentVersion ||
+			completion.ApplicationCount != len(inventory.Applications) {
+			response.Phase = "enrollment"
+			response.EnrollmentStatus = "unknown"
+			response.RetrySafe = false
+			return writeOperationFailure(writer, errorWriter, response, errors.New("enrollment completion record does not match the installed inventory"))
+		}
 		response.Success = true
 		response.Phase = "enrolled"
 		response.EnrollmentStatus = "registered"
@@ -432,6 +471,14 @@ func runStartAgentOperation(response HelperResponse, writer io.Writer, errorWrit
 		response.EnrollmentStatus = "unknown"
 		response.RetrySafe = false
 		return writeOperationFailure(writer, errorWriter, response, errors.New("verified enrollment and broker completion record is missing; do not repeat enrollment"))
+	}
+	inventory, err := readProvisionInventory()
+	if err != nil || completion.AgentVersion != inventory.AgentVersion ||
+		completion.ApplicationCount != len(inventory.Applications) {
+		response.Phase = "service_activation"
+		response.EnrollmentStatus = "unknown"
+		response.RetrySafe = false
+		return writeOperationFailure(writer, errorWriter, response, errors.New("enrollment completion record does not match the installed inventory"))
 	}
 
 	response.Phase = "service_activation"
