@@ -12,8 +12,8 @@ import (
 	"io"
 	"net/url"
 	"os"
-	"os/user"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -345,7 +345,6 @@ func runInstallAgentOperation(request ProvisionOperationRequest, response Helper
 	writeHelperResponse(writer, response)
 	return 0
 }
-
 
 func restoreExistingAgentIdentity(
 	request ProvisionOperationRequest,
