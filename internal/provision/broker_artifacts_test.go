@@ -147,7 +147,7 @@ func TestBuildBrokerDropInRejectsInvalidMapping(t *testing.T) {
 				RuntimeUID:          1001,
 				RuntimeGID:          1001,
 				CredentialFile:      "/var/lib/nadi-bridge/not-a-uuid/credential",
-				ActivationStateFile: "/run/nadi-agent/bridge-state/not-a-uuid.json",
+				ActivationStateFile: "/run/nadi/bridge-state/not-a-uuid.json",
 			},
 		},
 	}
