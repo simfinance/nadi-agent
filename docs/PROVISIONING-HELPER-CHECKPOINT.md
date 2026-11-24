@@ -96,6 +96,18 @@ Latest Agent source commit for this checkpoint: `a0a1fdd434c93702ea858d88f30eff8
 - [x] Broker tests cover rejection of application-tree destinations and acceptance of the fixed external destination.
 - [ ] Bridge runtime configuration still defaults to `storage/app/private/nadi/credential`; it must be updated to resolve the same external per-application path before end-to-end credential handoff can work.
 
+## Broker artifact reconciliation added in the latest increment
+
+- [x] Added a strict reconciler that accepts only the non-secret enrollment summary emitted by the Agent CLI and matches every Central application key to exactly one prevalidated local mapping.
+- [x] Reconciler derives the only allowed credential and activation-state destinations from Central-issued application UUIDs; callers cannot choose arbitrary output paths.
+- [x] Reconciler validates the complete broker mapping through the broker's own configuration validator before emitting any artifact.
+- [x] Added deterministic broker mapping JSON and a systemd drop-in containing only each application's exact `/var/lib/nadi-bridge/{application_id}` write path.
+- [x] Added unit tests for multi-application reconciliation, deterministic ordering, exact write-path scope, missing application mappings, unknown summary fields, and invalid mappings.
+- [ ] The artifact builder is not yet a root-owned installer: it does not create directories, write files, install binaries/keys/units, invoke enrollment, enable services, or verify runtime status.
+- [ ] The Go tests and CI workflow for this increment have not yet been confirmed.
+
+The new code is in `internal/provision/broker_artifacts.go` and `internal/provision/broker_artifacts_test.go`. It is a bounded preparation step for the helper, not a claim that provisioning is complete.
+
 ## Current implementation gaps
 
 - [ ] Root-owned `nadi-provision` executable and strict request parser.
