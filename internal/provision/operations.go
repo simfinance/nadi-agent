@@ -460,6 +460,30 @@ func readProvisionInventory() (provisionInventory, error) {
 	return inventory, nil
 }
 
+func hasProvisionEnrollmentAttempt() (bool, error) {
+    content, err := readRootOwnedRegularFile(provisionAttemptPath, 4096)
+    if errors.Is(err, os.ErrNotExist) {
+        return false, nil
+    }
+    if err != nil {
+        return false, err
+    }
+
+    var attempt provisionEnrollmentAttempt
+    decoder := json.NewDecoder(bytes.NewReader(content))
+    decoder.DisallowUnknownFields()
+    if err := decoder.Decode(&attempt); err != nil || ensureJSONEOF(decoder) != nil ||
+        attempt.ProtocolVersion != 1 || attempt.ApplicationCount < 1 ||
+        attempt.ApplicationCount > 20 || len(attempt.ManifestSHA256) != 64 {
+        return false, errors.New("enrollment attempt metadata is invalid")
+    }
+    if _, err := hex.DecodeString(attempt.ManifestSHA256); err != nil {
+        return false, errors.New("enrollment attempt manifest digest is invalid")
+    }
+
+    return true, nil
+}
+
 func readProvisionCompletion() (provisionCompletion, error) {
 	content, err := readRootOwnedRegularFile(provisionCompletePath, 4096)
 	if err != nil {
