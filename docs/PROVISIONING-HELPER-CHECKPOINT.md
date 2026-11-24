@@ -190,3 +190,44 @@ Latest Bridge branch head: `5fd0a0159d3ee66a6dfa9a8138d266bc62f60332`.
 The failed run is a real test failure, not a code-formatting issue. Do not mark the Agent path migration CI-passed until a run against the corrected branch head completes successfully.
 
 The root-owned provisioning helper, fixed per-application path derivation/validation inside Bridge, systemd reload/start orchestration, post-install verification, rollback, and end-to-end tests remain incomplete. No Central files or production hosts were changed.
+
+
+## Provisioning helper source foundation — 2026-11-24
+
+The following implementation foundation has been added on the Agent branch:
+
+- [x] Added the fixed `cmd/nadi-provision --request-stdin` executable entrypoint. It accepts no caller-selected command or path argument.
+- [x] Added bounded helper outcome JSON with phase, enrollment status, retry-safety flag, version, application count, and a non-secret message.
+- [x] Added signed release-manifest verification, Linux artifact selection, staged artifact ownership/path checks, and a second SHA-256 check before installation.
+- [x] Added fixed `nadi-agent` account/group provisioning and canonical directory preparation.
+- [x] Added atomic, root-owned installation of the Agent binary, activation public key, and fixed systemd unit assets. Existing non-identical files are not overwritten.
+- [x] Added independent validation that each application path is canonical, has a regular `artisan` entrypoint, and uses a non-root UID/GID represented by a root-owned PHP-FPM pool configuration.
+- [x] Corrected the broker activation-state directory parent to `/run/nadi`.
+- [x] Corrected broker artifact installation so it preserves `/etc/nadi` mode `0750` and does not silently change the parent directory to `0755`.
+- [x] Added helper output, PHP-FPM identity, and directory-permission tests.
+
+### Release-blocking items discovered during implementation
+
+The helper is a source prototype only. It is not installed on a host, signed as a separate trusted OS helper, or connected to a production sudoers rule.
+
+The current helper orchestration must not be treated as release-ready because the Bridge `PRIVILEGED-PROVISIONING-BOUNDARY.md` contains a protocol inconsistency that needs an explicit decision:
+
+- The protocol v1 `install_agent` request envelope includes the one-time enrollment token.
+- The same document says the `install_agent` operation must not enroll the Agent.
+- The document also requires a separate fixed operation for enabling and starting `nadi-agent.service`.
+
+The recommended resolution is to split the fixed helper operations into `install_agent` (install only), `enroll_agent` (execute the signed-inventory enrollment as `nadi-agent`, token via stdin), and `start_agent` (enable/start only the fixed NADI services after enrollment and broker mapping verification). This is a proposed contract clarification, not an approved architecture change. Do not wire or release the current combined orchestration until the contract is approved and the Bridge adapter is updated consistently.
+
+Additional gaps remain:
+
+- [ ] Implement a tested rollback journal for pre-enrollment filesystem/service-account changes.
+- [ ] Implement the approved operation split and partial-outcome handling across the Bridge adapter.
+- [ ] Implement identity restore/repair for an existing valid `/var/lib/nadi/state.json`. The current prototype deliberately refuses a new enrollment when that file exists; it does not yet satisfy the Master Architecture RESTORE requirement.
+- [ ] Resolve how installer-managed Bridge identity values (`application_id`, `application_key`, credential path, activation-state path) are provisioned without silently editing client application configuration.
+- [ ] Preserve the Bridge fail-closed defaults until the Central source-IP allowlist is verified by infrastructure and Bridge activation identity is correctly provisioned.
+- [ ] Complete privileged helper tests, root/non-root integration tests, systemd lifecycle tests, rollback tests, and end-to-end tests.
+- [ ] Publish and verify the separate helper through a trusted OS provisioning channel. Composer must not create, replace, or bootstrap it through sudo.
+
+Latest confirmed full Agent CI before the helper source increment: workflow #213 on commit `0f5cc11d7d4cfd9a0b74f0965c32c7233e7413b1`, with Go tests, race tests, vet, AMD64 and ARM64 builds passing.
+
+The new helper source increment is under validation. Do not infer CI success from the previous run or from a formatting-only job. No Central files or production hosts were changed.
