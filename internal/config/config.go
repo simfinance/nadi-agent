@@ -34,13 +34,13 @@ func Load() (Config, error) {
 		LogLevel:                  strings.ToLower(envOrDefault("NADI_LOG_LEVEL", "info")),
 		PollInterval:              30 * time.Second,
 		HTTPTimeout:               10 * time.Second,
-		StateDir:                  envOrDefault("NADI_STATE_DIR", "/var/lib/nadi-agent"),
-		ActivationPublicKeyPath:   envOrDefault("NADI_ACTIVATION_PUBLIC_KEY", "/etc/nadi-agent/keys/activation-public.pem"),
+		StateDir:                  envOrDefault("NADI_STATE_DIR", "/var/lib/nadi"),
+		ActivationPublicKeyPath:   envOrDefault("NADI_ACTIVATION_PUBLIC_KEY", "/etc/nadi/keys/activation-public.pem"),
 		ActivationKeyID:           envOrDefault("NADI_ACTIVATION_KEY_ID", "nadi-central-2026-01"),
 		LogTelemetryEnabled:       false,
 		SystemLogTelemetryEnabled: false,
 		NginxErrorLogPath:         strings.TrimSpace(os.Getenv("NADI_AGENT_NGINX_ERROR_LOG_PATH")),
-		HandoffSocketPath:         envOrDefault("NADI_AGENT_HANDOFF_SOCKET", "/run/nadi-agent/credential-handoff.sock"),
+		HandoffSocketPath:         envOrDefault("NADI_AGENT_HANDOFF_SOCKET", "/run/nadi/credential-handoff.sock"),
 	}
 
 	if value := strings.TrimSpace(os.Getenv("NADI_AGENT_LOG_TELEMETRY_ENABLED")); value != "" {
