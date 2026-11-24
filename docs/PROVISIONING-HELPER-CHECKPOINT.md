@@ -108,6 +108,19 @@ Latest Agent source commit for this checkpoint: `a0a1fdd434c93702ea858d88f30eff8
 
 The new code is in `internal/provision/broker_artifacts.go` and `internal/provision/broker_artifacts_test.go`. It is a bounded preparation step for the helper, not a claim that provisioning is complete.
 
+## Atomic broker artifact installation increment
+
+- [x] Added a root-only installation entry point for the validated broker mapping and generated per-application systemd drop-in.
+- [x] The installer re-derives expected mapping JSON and drop-in content from the validated broker configuration; caller-supplied bytes must match exactly.
+- [x] Creates/validates the fixed Bridge credential root and per-application directories without following symlinks; enforces root ownership and restrictive permissions.
+- [x] Writes mapping and drop-in files using same-directory temporary files, fsync, atomic rename, and directory fsync.
+- [x] Added tests for file modes, credential directory ownership/mode, exact drop-in scope, mismatched artifacts, and symlink rejection.
+- [x] The installer deliberately does not reload systemd or start services. Those actions belong to the not-yet-implemented privileged orchestration layer, after all provisioning prerequisites and rollback boundaries are in place.
+- [ ] This is still not the `nadi-provision --request-stdin` helper and does not install or verify the Agent binary, trusted activation key, service units, system user, or enrollment lifecycle.
+- [ ] Go CI for this increment is pending.
+
+Files: `internal/provision/broker_artifact_install.go` and `internal/provision/broker_artifact_install_test.go`.
+
 ## Current implementation gaps
 
 - [ ] Root-owned `nadi-provision` executable and strict request parser.
