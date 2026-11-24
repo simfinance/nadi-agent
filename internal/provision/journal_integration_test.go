@@ -59,6 +59,39 @@ func TestProvisionLockCoordinatesSeparateProcessesAndReusesStaleLockFile(t *test
 	}
 }
 
+func TestProvisionLockIsReleasedAfterAbruptProcessExit(t *testing.T) {
+	const childMarker = "NADI_PROVISION_LOCK_CRASH_CHILD"
+	if os.Getenv(childMarker) == "1" {
+		lockPath := os.Getenv("NADI_PROVISION_LOCK_PATH")
+		if _, err := acquireProvisionLockAt(lockPath); err != nil {
+			os.Exit(3)
+		}
+
+		os.Exit(0)
+	}
+
+	directory := t.TempDir()
+	path := filepath.Join(directory, "provision.lock")
+	command := exec.Command(
+		os.Args[0],
+		"-test.run=^TestProvisionLockIsReleasedAfterAbruptProcessExit$",
+	)
+	command.Env = append(
+		os.Environ(),
+		childMarker+"=1",
+		"NADI_PROVISION_LOCK_PATH="+path,
+	)
+	if err := command.Run(); err != nil {
+		t.Fatalf("child process failed before abrupt exit: %v", err)
+	}
+
+	unlock, err := acquireProvisionLockAt(path)
+	if err != nil {
+		t.Fatalf("kernel-released lock could not be acquired after child process exit: %v", err)
+	}
+	unlock()
+}
+
 func TestProvisionJournalRetainsFixedServiceAccount(t *testing.T) {
 	directory := t.TempDir()
 	store, journal, err := newProvisionJournal(filepath.Join(directory, "journal.json"))
