@@ -15,6 +15,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -256,6 +257,15 @@ func ensureNoSymlinkPath(path string) error {
 }
 
 func validateApplicationTargets(request ProvisionRequest) error {
+	return validateApplicationTargetsAt(request, "/etc/php")
+}
+
+func validateApplicationTargetsAt(request ProvisionRequest, configurationRoot string) error {
+	poolIdentities, err := readPHPFPMRuntimeIdentities(configurationRoot)
+	if err != nil {
+		return err
+	}
+
 	for index, application := range request.Applications {
 		if err := ensureNoSymlinkPath(application.BasePath); err != nil {
 			return fmt.Errorf("application %d base path is unsafe: %w", index, err)
@@ -278,9 +288,91 @@ func validateApplicationTargets(request ProvisionRequest) error {
 		if _, err := user.LookupGroupId(strconv.Itoa(application.RuntimeGID)); err != nil {
 			return fmt.Errorf("application %d runtime group does not exist", index)
 		}
+
+		if _, exists := poolIdentities[fmt.Sprintf("%d:%d", application.RuntimeUID, application.RuntimeGID)]; !exists {
+			return fmt.Errorf("application %d runtime UID/GID does not match a root-owned PHP-FPM pool", index)
+		}
 	}
 
 	return nil
+}
+
+func readPHPFPMRuntimeIdentities(configurationRoot string) (map[string]struct{}, error) {
+	if err := ensureNoSymlinkPath(configurationRoot); err != nil {
+		return nil, fmt.Errorf("PHP-FPM configuration root is unsafe: %w", err)
+	}
+
+	rootMetadata, err := os.Lstat(configurationRoot)
+	if err != nil {
+		return nil, err
+	}
+	rootStat, ok := rootMetadata.Sys().(*syscall.Stat_t)
+	if !ok || rootStat.Uid != 0 || rootMetadata.Mode().Perm()&0022 != 0 {
+		return nil, errors.New("PHP-FPM configuration root must be root-owned and not group/other writable")
+	}
+
+	poolFiles, err := filepath.Glob(filepath.Join(configurationRoot, "*", "fpm", "pool.d", "*.conf"))
+	if err != nil {
+		return nil, fmt.Errorf("discover PHP-FPM pool configurations: %w", err)
+	}
+	if len(poolFiles) == 0 {
+		return nil, errors.New("no PHP-FPM pool configuration was found")
+	}
+
+	userPattern := regexp.MustCompile("(?m)^[\\t ]*user[\\t ]*=[\\t ]*([a-zA-Z_][a-zA-Z0-9_.-]*)[\\t ]*$")
+	groupPattern := regexp.MustCompile("(?m)^[\\t ]*group[\\t ]*=[\\t ]*([a-zA-Z_][a-zA-Z0-9_.-]*)[\\t ]*$")
+	identities := make(map[string]struct{}, len(poolFiles))
+
+	for _, poolPath := range poolFiles {
+		metadata, err := os.Lstat(poolPath)
+		if err != nil {
+			return nil, fmt.Errorf("inspect PHP-FPM pool configuration: %w", err)
+		}
+		if metadata.Mode()&os.ModeSymlink != 0 || !metadata.Mode().IsRegular() || metadata.Size() < 1 || metadata.Size() > 64*1024 {
+			return nil, errors.New("PHP-FPM pool configuration must be a bounded regular non-symlink file")
+		}
+		stat, ok := metadata.Sys().(*syscall.Stat_t)
+		if !ok || stat.Uid != 0 || metadata.Mode().Perm()&0022 != 0 {
+			return nil, errors.New("PHP-FPM pool configuration must be root-owned and not group/other writable")
+		}
+
+		content, err := os.ReadFile(poolPath)
+		if err != nil {
+			return nil, fmt.Errorf("read PHP-FPM pool configuration: %w", err)
+		}
+
+		userMatch := userPattern.FindSubmatch(content)
+		if len(userMatch) != 2 {
+			return nil, errors.New("PHP-FPM pool configuration has no valid runtime user")
+		}
+		runtimeUser, err := user.Lookup(string(userMatch[1]))
+		if err != nil {
+			return nil, errors.New("PHP-FPM pool runtime user cannot be resolved")
+		}
+		uid, err := strconv.Atoi(runtimeUser.Uid)
+		if err != nil || uid < 1 {
+			return nil, errors.New("PHP-FPM pool runtime UID must be non-root")
+		}
+
+		gid := 0
+		groupMatch := groupPattern.FindSubmatch(content)
+		if len(groupMatch) == 2 {
+			runtimeGroup, lookupErr := user.LookupGroup(string(groupMatch[1]))
+			if lookupErr != nil {
+				return nil, errors.New("PHP-FPM pool runtime group cannot be resolved")
+			}
+			gid, err = strconv.Atoi(runtimeGroup.Gid)
+		} else {
+			gid, err = strconv.Atoi(runtimeUser.Gid)
+		}
+		if err != nil || gid < 1 {
+			return nil, errors.New("PHP-FPM pool runtime GID must be non-root")
+		}
+
+		identities[fmt.Sprintf("%d:%d", uid, gid)] = struct{}{}
+	}
+
+	return identities, nil
 }
 
 func validateStagedArtifactOwner(request ProvisionRequest) error {
