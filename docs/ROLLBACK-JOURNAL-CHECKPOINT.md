@@ -1,6 +1,6 @@
 # Provisioning Rollback Journal — Implementation Checkpoint
 
-Status: journal core implemented; integration with the three provisioning operations remains pending. This is not a production-ready rollback implementation.
+Status: journal core and the fresh-install (`install_agent`) integration are implemented in the current branch. Restore, Bridge artifact reconciliation after enrollment, concurrency control, failure-injection coverage, and full E2E validation remain pending. This is not a production-ready rollback implementation.
 
 ## Safety contract
 
@@ -41,4 +41,26 @@ An intent without a post-operation fingerprint is ambiguous. The helper must pre
 
 The helper must create the journal before the first reversible filesystem mutation, then instrument directory and file creation in `install_agent`, broker artifact installation, and relevant restore paths. It must commit only after the installed inventory and all required local assets pass verification. Failure handling must run rollback and return a non-secret bounded status. A stale or malformed journal must block another install attempt until explicitly reconciled.
 
-The current implementation only provides the journal data model, durable atomic persistence, resource fingerprints, and fail-closed reverse rollback primitives. It does not yet connect those primitives to installer mutations or invoke rollback automatically.
+## Current implementation increment
+
+- [x] Added a durable journal at the fixed temporary path `/etc/.nadi-provisioning-journal.json`; it is root-owned in the privileged runtime and mode 0600.
+- [x] The journal is created before the first fresh-install account or filesystem mutation.
+- [x] `install_agent` records directory and file creation intent before mutation, then records a device/inode/owner/group/mode fingerprint and SHA-256 for files after successful creation.
+- [x] Fresh-install failure invokes reverse-order rollback. Files are removed only when their current fingerprint still matches; directories are removed only when their fingerprint matches and they are empty.
+- [x] A resource with an intent but no verified post-operation fingerprint is preserved and reported as `recovery_required`.
+- [x] The fixed `nadi-agent` account is explicitly retained; the helper does not attempt to delete an account that may predate the transaction or be in use.
+- [x] Existing directories with mismatched ownership or mode are rejected instead of silently chmodded by the journal-aware fresh-install path.
+- [x] A stale in-progress journal is rolled back before a new fresh install. A committed journal is accepted only when the root-owned inventory matches the signed release and requested application inventory.
+- [x] Added unit tests for file/directory rollback, modified-resource refusal, un-fingerprinted intent refusal, retained service account, journal parent permissions, and journal-aware installation helpers.
+
+## Remaining integration and verification
+
+- [ ] Add serialization/locking so concurrent helper invocations cannot race through install, enrollment, and service activation.
+- [ ] Extend transaction tracking to the RESTORE metadata path without ever touching the existing Agent state or credentials.
+- [ ] Define the recovery behavior for broker mapping/drop-in writes after Central enrollment. Those writes occur after the irreversible enrollment boundary; Agent state must be preserved and local rollback must not imply Central enrollment was undone.
+- [ ] Add fault-injection tests at every mutation boundary, including process interruption between intent, filesystem mutation, fingerprint persistence, rollback deletion, and journal update.
+- [ ] Verify behavior on supported Linux filesystems and systemd hosts, including directory fsync and ownership behavior.
+- [ ] Run the complete CI workflow on the final branch head, then add root/non-root/systemd end-to-end coverage.
+- [ ] Confirm the Bridge adapter handles `rolled_back`, `recovery_required`, and retained committed-journal responses without prompting for a new token.
+
+The current implementation is an integrated first increment for the reversible fresh-install filesystem phase only. It does not make account creation reversible, does not roll back Central enrollment, and does not yet make RESTORE or the complete three-operation lifecycle transactionally recoverable.
