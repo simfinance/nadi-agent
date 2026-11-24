@@ -76,6 +76,18 @@ The existing local handoff protocol uses a root-owned broker and kernel-authenti
 
 ## Latest work in this checkpoint
 
+- [x] Read-only Central contract review is recorded in [CENTRAL-CONTRACT-VERIFICATION.md](CENTRAL-CONTRACT-VERIFICATION.md). Central was not modified.
+- [x] Agent enrollment tolerates missing optional server IPv4 data, matching Central's nullable `server.ip_address`.
+- [x] Control Poll fixture uses Central's string-valued `endpoint` and asserts decoding.
+- [x] Broker credential destinations are constrained to `/var/lib/nadi-bridge/{application_id}/credential`; writable Laravel application trees are rejected.
+- [x] Broker mapping validation now requires UUID application IDs, fixed credential and activation-state destinations, distinct runtime UIDs, canonical non-root application paths, and non-overlapping application paths.
+- [x] Broker tests cover rejection of application-tree destinations and duplicate runtime UIDs.
+- [x] Broker systemd base unit is limited to `/run/nadi-agent`; the Agent unit's write scope is limited to `/var/lib/nadi-agent`.
+- [ ] The helper still needs to generate a root-owned systemd drop-in containing only the exact per-application credential parent directories.
+- [ ] Bridge runtime configuration still defaults to `storage/app/private/nadi/credential`; it must resolve the external per-application path before end-to-end credential handoff can work.
+- [ ] The helper has not yet been implemented. No root provisioning, enrollment invocation, service start, or deployment was performed.
+
+
 - [x] Broker credential destinations are constrained to `/var/lib/nadi-bridge/{application_id}/credential`; writable Laravel application trees are rejected.
 - [x] Broker unit source has the fixed runtime directory boundary; the installer must add exact per-application credential-directory write paths rather than granting the whole Bridge data root.
 - [x] Broker tests cover rejection of application-tree destinations and acceptance of the fixed external destination.
