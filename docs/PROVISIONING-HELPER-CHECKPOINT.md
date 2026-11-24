@@ -230,6 +230,6 @@ Additional gaps remain:
 - [ ] Complete privileged helper tests, root/non-root integration tests, systemd lifecycle tests, rollback tests, and end-to-end tests.
 - [ ] Publish and verify the separate helper through a trusted OS provisioning channel. Composer must not create, replace, or bootstrap it through sudo.
 
-Latest confirmed full Agent CI before the helper source increment: workflow #213 on commit `0f5cc11d7d4cfd9a0b74f0965c32c7233e7413b1`, with Go tests, race tests, vet, AMD64 and ARM64 builds passing.
+Latest full Agent CI including the helper source foundation: workflow #236 on commit `c8c439d7630ac55bf2f94f7d916e4d1e89d77c3f` passed gofmt, `go test ./...`, `go test -race ./...`, `go vet ./...`, Linux AMD64 build, and Linux ARM64 build. Run: https://github.com/simfinance/nadi-agent/actions/runs/45316553340.
 
 The new helper source increment is under validation. Do not infer CI success from the previous run or from a formatting-only job. No Central files or production hosts were changed.
