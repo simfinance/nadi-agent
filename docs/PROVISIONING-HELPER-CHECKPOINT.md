@@ -233,3 +233,29 @@ Additional gaps remain:
 Latest full Agent CI including the helper source foundation: workflow #236 on commit `c8c439d7630ac55bf2f94f7d916e4d1e89d77c3f` passed gofmt, `go test ./...`, `go test -race ./...`, `go vet ./...`, Linux AMD64 build, and Linux ARM64 build. Run: https://github.com/simfinance/nadi-agent/actions/runs/45316553340.
 
 The new helper source increment is under validation. Do not infer CI success from the previous run or from a formatting-only job. No Central files or production hosts were changed.
+
+## Security hardening and installation UX checkpoint — 2026-11-24
+
+- [x] PHP-FPM pool configuration validation now rejects symlinked directory components, non-root-owned or group/other-writable directories, symlink/non-regular pool files, unsafe ownership/modes, and file replacement between metadata inspection and open.
+- [x] Added tests for symlinked PHP-FPM directory components, paths outside the configured root, and symlinked pool files.
+- [x] Agent CI workflow #239 passed on branch head `51e5e41f837130a441f0240b1e6389671f4a94a9`: formatting, `go test ./...`, `go test -race ./...`, `go vet ./...`, Linux AMD64 build, and Linux ARM64 build. https://github.com/simfinance/nadi-agent/actions/runs/45321575260
+- [x] Pull request #2 remains open and draft; current head is `51e5e41f837130a441f0240b1e6389671f4a94a9`. This CI result validates the current Go source checks only; it is not a privileged-host, systemd, rollback, or end-to-end test.
+
+### Mandatory two-command customer installation experience
+
+The customer-facing Laravel installation remains exactly:
+
+```bash
+composer require nadi/laravel-agent
+php artisan nadi:install
+```
+
+No third customer command may be introduced for provisioning, enrollment, service activation, or verification. All required internal provisioning phases must be orchestrated by the single Artisan installer command, with narrow privilege escalation through the fixed trusted helper interface. Composer must not invoke sudo, install/replace the privileged helper, or run privileged Composer scripts.
+
+The two-command requirement does not relax any security boundary: the Agent runtime remains non-root as `nadi-agent`; helper operations remain fixed and allowlisted; enrollment remains one request for the complete 1–20 application inventory; the one-use token must not appear in argv, environment, logs, or output; and monitoring remains blocked until per-application approval, a valid signed Activation Grant, and accepted acknowledgement.
+
+### Approval gate remains open
+
+ADR-0002 is still **Proposed — awaiting explicit approval**. Its proposed internal separation (`install_agent`, `enroll_agent`, `start_agent`) must not be treated as an accepted protocol or wired into the release installer until explicitly approved and implemented consistently in Agent and Bridge. The user-facing two-command requirement is a UX constraint, not approval of ADR-0002.
+
+Outstanding release blockers remain: rollback journal, safe existing-Agent identity restore/repair, installer-managed Bridge identity provisioning, trusted OS helper packaging/bootstrap, root/non-root and systemd integration tests, and end-to-end validation. Central remains read-only; no production host has been modified.
