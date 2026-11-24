@@ -100,7 +100,7 @@ func installBrokerArtifactsAt(
 		}
 	}
 
-	mappingPath := filepath.Join(root, "etc", "nadi-agent", "bridge-mappings.json")
+	mappingPath := filepath.Join(root, "etc", "nadi", "bridge-mappings.json")
 	if err := ensureDirectoryTree(
 		root,
 		filepath.Dir(mappingPath),
@@ -154,7 +154,7 @@ func installBrokerArtifactsAt(
 
 func encodeBrokerMapping(config handoffbroker.Config) ([]byte, error) {
 	if _, err := handoffbroker.NewServer(
-		"/run/nadi-agent/credential-handoff.sock",
+		"/run/nadi/credential-handoff.sock",
 		config,
 	); err != nil {
 		return nil, fmt.Errorf("broker mapping is invalid: %w", err)
