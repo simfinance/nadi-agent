@@ -248,7 +248,7 @@ func writeOwnedAtomicFile(
 	ownerGID int,
 ) error {
 	parent := filepath.Dir(path)
-	if err := ensureOwnedDirectory(parent, systemDirectoryMode, ownerUID, ownerGID); err != nil {
+	if err := ensureOwnedDirectory(parent, 0, ownerUID, ownerGID); err != nil {
 		return fmt.Errorf("destination parent is unsafe: %w", err)
 	}
 
