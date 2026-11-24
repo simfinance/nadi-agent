@@ -68,6 +68,7 @@ type CredentialRotation struct {
 
 type State struct {
 	SchemaVersion             int                      `json:"schema_version"`
+	IntegritySignature        string                   `json:"integrity_signature"`
 	AgentInstanceID           string                   `json:"agent_instance_id"`
 	Hostname                  string                   `json:"hostname"`
 	MachineFingerprint        string                   `json:"machine_fingerprint"`
@@ -92,6 +93,7 @@ type State struct {
 type Store struct {
 	directory string
 	lockFile  *os.File
+	privateKey []byte
 	mutex     sync.Mutex
 	closed    bool
 }
@@ -125,9 +127,17 @@ func Open(directory string) (*Store, error) {
 		return nil, fmt.Errorf("another NADI Agent process may already be running: %w", err)
 	}
 
+	privateKey, err := loadOrCreateIntegrityKey(directory)
+	if err != nil {
+		syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+		lockFile.Close()
+		return nil, fmt.Errorf("load Agent state integrity key: %w", err)
+	}
+
 	return &Store{
-		directory: directory,
-		lockFile:  lockFile,
+		directory:  directory,
+		lockFile:   lockFile,
+		privateKey: privateKey,
 	}, nil
 }
 
@@ -164,6 +174,9 @@ func (s *Store) Load() (State, error) {
 
 	if current.AgentInstanceID == "" {
 		return State{}, errors.New("agent state has an empty agent_instance_id")
+	}
+	if err := verifyIntegrity(current, ed25519.PrivateKey(s.privateKey).Public().(ed25519.PublicKey)); err != nil {
+		return State{}, fmt.Errorf("verify Agent state integrity: %w", err)
 	}
 
 	return current, nil
@@ -250,6 +263,14 @@ func LoadReadOnly(directory string) (State, error) {
 		return State{}, errors.New("persisted Agent state has an empty agent_instance_id")
 	}
 
+	privateKey, err := loadExistingIntegrityKey(directory)
+	if err != nil {
+		return State{}, fmt.Errorf("load Agent state integrity key: %w", err)
+	}
+	if err := verifyIntegrity(current, privateKey.Public().(ed25519.PublicKey)); err != nil {
+		return State{}, fmt.Errorf("verify Agent state integrity: %w", err)
+	}
+
 	return current, nil
 }
 
@@ -267,6 +288,9 @@ func (s *Store) Save(current State) error {
 
 	current.SchemaVersion = CurrentSchemaVersion
 	current.UpdatedAt = time.Now().UTC()
+	if err := signIntegrity(&current, ed25519.PrivateKey(s.privateKey)); err != nil {
+		return fmt.Errorf("sign Agent state integrity: %w", err)
+	}
 
 	content, err := json.MarshalIndent(current, "", "    ")
 	if err != nil {
