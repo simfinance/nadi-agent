@@ -138,4 +138,3 @@ func TestEnrollmentTokenPatternRejectsWhitespace(t *testing.T) {
     }
 }
 
-var _ = json.Valid
