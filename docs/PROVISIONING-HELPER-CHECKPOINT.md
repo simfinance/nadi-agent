@@ -180,11 +180,13 @@ The canonical path decision is resolved by ADR-0001 and the source migration is 
 - [x] Broker/config/provisioning tests updated to assert the canonical locations.
 - [x] Bridge no longer defaults credential storage to the Laravel application storage tree; the installer-managed environment settings default to null.
 - [x] Bridge packaged Agent unit and handoff documentation aligned with canonical paths.
-- [ ] Latest Agent CI validation is still running. Workflow #45309436924: https://github.com/simfinance/nadi-agent/actions/runs/45309436924. Formatting job passed; unit tests, race tests, vet, and Linux builds were still running at checkpoint time.
+- [ ] Latest Agent CI validation is pending after a test-fixture correction. Workflow #45309436924 exposed one stale test expectation still pointing to `/etc/nadi-agent/bridge-mappings.json`; the production code and test fixture have now both been aligned to `/etc/nadi/bridge-mappings.json`. The correction is committed as `922e06ff0f4ccb4c189b424cae4d3a48402264d6`; a successful validation run for this corrected commit has not yet been confirmed.
 - [x] Latest Bridge CI validation passed. Workflow #45309364276: https://github.com/simfinance/nadi-laravel-agent/actions/runs/45309364276.
 
-Latest Agent source/test commit: `eacc82e07437eace0bf0b02f50c1ec0da874d3c7`.
-Latest Agent branch head at this checkpoint (documentation included): `b90d47963a72b56e023d454cb01c928d61fc1e73`.
+Latest Agent source/test commit: `922e06ff0f4ccb4c189b424cae4d3a48402264d6`.
+Latest Agent branch head at this checkpoint (before any formatter-only commit): `922e06ff0f4ccb4c189b424cae4d3a48402264d6`.
 Latest Bridge branch head: `5fd0a0159d3ee66a6dfa9a8138d266bc62f60332`.
+
+The failed run is a real test failure, not a code-formatting issue. Do not mark the Agent path migration CI-passed until a run against the corrected branch head completes successfully.
 
 The root-owned provisioning helper, fixed per-application path derivation/validation inside Bridge, systemd reload/start orchestration, post-install verification, rollback, and end-to-end tests remain incomplete. No Central files or production hosts were changed.
