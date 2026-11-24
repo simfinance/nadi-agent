@@ -65,6 +65,7 @@ A stale or malformed journal must block another install attempt until explicitly
 ## Remaining integration and verification
 
 - [x] Add separate-process lock tests: a second process cannot acquire an actively-held lock; a new process can acquire the persistent lock file after release; and the kernel releases the flock when the lock-owning process exits abruptly.
+- [x] Add lock-path hardening tests that reject symlink lock files and pre-existing lock files with unsafe permissions.
 - [ ] Add host crash/reboot recovery tests on supported Linux filesystems, including journal and directory durability after power loss.
 - [x] Extend transaction tracking to identity RESTORE metadata, canonical directories, missing signed assets, broker mapping/drop-in artifacts, and completion metadata. The existing Agent state and credentials are excluded from the journal and are never modified by rollback.
 - [ ] Extend transaction tracking to broker mapping/drop-in writes performed by `enroll_agent` after Central registration. Preserve Agent state and report a non-retryable partial outcome if local reconciliation fails.
