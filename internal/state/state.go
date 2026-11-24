@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -166,6 +167,105 @@ func (s *Store) Load() (State, error) {
 	}
 
 	return current, nil
+}
+
+func LoadReadOnly(directory string) (State, error)
+{
+    if directory == "" || !filepath.IsAbs(directory) || filepath.Clean(directory) != directory
+    {
+        return State{}, errors.New("state directory must be absolute and canonical");
+    }
+
+    directoryMetadata, err := os.Lstat(directory);
+    if err != nil
+    {
+        return State{}, fmt.Errorf("inspect Agent state directory: %w", err);
+    }
+
+    directoryStat, ok := directoryMetadata.Sys().(*syscall.Stat_t);
+    if !ok ||
+        directoryMetadata.Mode()&os.ModeSymlink != 0 ||
+        !directoryMetadata.IsDir() ||
+        directoryStat.Uid != uint32(os.Geteuid()) ||
+        directoryMetadata.Mode().Perm() != 0700
+    {
+        return State{}, errors.New("Agent state directory ownership or permissions are unsafe");
+    }
+
+    path := filepath.Join(directory, "state.json");
+    pathMetadata, err := os.Lstat(path);
+    if err != nil
+    {
+        if errors.Is(err, os.ErrNotExist)
+        {
+            return State{}, ErrNotFound;
+        }
+
+        return State{}, fmt.Errorf("inspect persisted Agent state: %w", err);
+    }
+
+    pathStat, ok := pathMetadata.Sys().(*syscall.Stat_t);
+    if !ok ||
+        pathMetadata.Mode()&os.ModeSymlink != 0 ||
+        !pathMetadata.Mode().IsRegular() ||
+        pathStat.Uid != uint32(os.Geteuid()) ||
+        pathMetadata.Mode().Perm() != 0600 ||
+        pathMetadata.Size() < 1 ||
+        pathMetadata.Size() > 1<<20
+    {
+        return State{}, errors.New("persisted Agent state ownership, permissions, or size are unsafe");
+    }
+
+    file, err := os.Open(path);
+    if err != nil
+    {
+        return State{}, fmt.Errorf("open persisted Agent state: %w", err);
+    }
+    defer file.Close();
+
+    openedMetadata, err := file.Stat();
+    if err != nil
+    {
+        return State{}, fmt.Errorf("inspect opened Agent state: %w", err);
+    }
+
+    openedStat, ok := openedMetadata.Sys().(*syscall.Stat_t);
+    if !ok ||
+        openedStat.Dev != pathStat.Dev ||
+        openedStat.Ino != pathStat.Ino ||
+        openedStat.Uid != uint32(os.Geteuid()) ||
+        !openedMetadata.Mode().IsRegular() ||
+        openedMetadata.Mode().Perm() != 0600
+    {
+        return State{}, errors.New("Agent state changed during read-only verification");
+    }
+
+    content, err := io.ReadAll(io.LimitReader(file, (1<<20)+1));
+    if err != nil
+    {
+        return State{}, fmt.Errorf("read persisted Agent state: %w", err);
+    }
+    if len(content) == 0 || len(content) > 1<<20
+    {
+        return State{}, errors.New("persisted Agent state is empty or exceeds the size limit");
+    }
+
+    var current State;
+    if err := json.Unmarshal(content, &current); err != nil
+    {
+        return State{}, fmt.Errorf("decode persisted Agent state: %w", err);
+    }
+
+    if current.SchemaVersion != CurrentSchemaVersion
+    {
+        return State{}, fmt.Errorf("unsupported Agent state schema version %d", current.SchemaVersion);
+    }
+    if current.AgentInstanceID == ""
+    {
+        return State{}, errors.New("persisted Agent state has an empty agent_instance_id");
+    }
+
+    return current, nil;
 }
 
 func (s *Store) Save(current State) error {
