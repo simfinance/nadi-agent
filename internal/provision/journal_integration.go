@@ -21,57 +21,56 @@ var provisionJournalRollbackRoots = []string{
 	"/run/nadi",
 }
 
-
 const provisionLockPath = "/etc/.nadi-provisioning.lock"
 
 func acquireProvisionLock() (func(), error) {
-    return acquireProvisionLockAt(provisionLockPath)
+	return acquireProvisionLockAt(provisionLockPath)
 }
 
 func acquireProvisionLockAt(path string) (func(), error) {
-    if !filepath.IsAbs(path) || filepath.Clean(path) != path {
-        return nil, errors.New("provisioning lock path must be absolute and canonical")
-    }
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return nil, errors.New("provisioning lock path must be absolute and canonical")
+	}
 
-    ownerUID := uint32(os.Geteuid())
-    ownerGID := uint32(os.Getegid())
-    if err := validateProvisionJournalParent(path, ownerUID, ownerGID); err != nil {
-        return nil, err
-    }
+	ownerUID := uint32(os.Geteuid())
+	ownerGID := uint32(os.Getegid())
+	if err := validateProvisionJournalParent(path, ownerUID, ownerGID); err != nil {
+		return nil, err
+	}
 
-    descriptor, err := syscall.Open(
-        path,
-        syscall.O_CREAT|syscall.O_RDWR|syscall.O_CLOEXEC|syscall.O_NOFOLLOW,
-        0600,
-    )
-    if err != nil {
-        return nil, fmt.Errorf("open provisioning lock: %w", err)
-    }
+	descriptor, err := syscall.Open(
+		path,
+		syscall.O_CREAT|syscall.O_RDWR|syscall.O_CLOEXEC|syscall.O_NOFOLLOW,
+		0600,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("open provisioning lock: %w", err)
+	}
 
-    metadata := &syscall.Stat_t{}
-    if err := syscall.Fstat(descriptor, metadata); err != nil {
-        syscall.Close(descriptor)
-        return nil, fmt.Errorf("inspect provisioning lock: %w", err)
-    }
-    if metadata.Mode&syscall.S_IFMT != syscall.S_IFREG ||
-        metadata.Uid != ownerUID ||
-        metadata.Gid != ownerGID ||
-        metadata.Mode&0777 != 0600 {
-        syscall.Close(descriptor)
-        return nil, errors.New("provisioning lock ownership or permissions are unsafe")
-    }
+	metadata := &syscall.Stat_t{}
+	if err := syscall.Fstat(descriptor, metadata); err != nil {
+		syscall.Close(descriptor)
+		return nil, fmt.Errorf("inspect provisioning lock: %w", err)
+	}
+	if metadata.Mode&syscall.S_IFMT != syscall.S_IFREG ||
+		metadata.Uid != ownerUID ||
+		metadata.Gid != ownerGID ||
+		metadata.Mode&0777 != 0600 {
+		syscall.Close(descriptor)
+		return nil, errors.New("provisioning lock ownership or permissions are unsafe")
+	}
 
-    if err := syscall.Flock(descriptor, syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-        syscall.Close(descriptor)
-        return nil, errors.New("another NADI provisioning operation is already running")
-    }
+	if err := syscall.Flock(descriptor, syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		syscall.Close(descriptor)
+		return nil, errors.New("another NADI provisioning operation is already running")
+	}
 
-    unlock := func() {
-        _ = syscall.Flock(descriptor, syscall.LOCK_UN)
-        _ = syscall.Close(descriptor)
-    }
+	unlock := func() {
+		_ = syscall.Flock(descriptor, syscall.LOCK_UN)
+		_ = syscall.Close(descriptor)
+	}
 
-    return unlock, nil
+	return unlock, nil
 }
 
 func prepareAgentDirectoriesJournaled(
