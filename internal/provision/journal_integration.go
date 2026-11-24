@@ -194,7 +194,7 @@ func ensureDirectoryTreeJournaled(
 				if markErr := store.MarkSkipped(journal, actionIndex); markErr != nil {
 					return fmt.Errorf("record concurrently-created directory %s: %w", current, markErr)
 				}
-				continue
+				return fmt.Errorf("directory %s appeared during provisioning; refusing to trust a concurrent resource", current)
 			}
 			return fmt.Errorf("create directory %s: %w", current, err)
 		}
@@ -207,12 +207,28 @@ func ensureDirectoryTreeJournaled(
 		if err := os.Chmod(current, createMode); err != nil {
 			return fmt.Errorf("set directory permissions for %s: %w", current, err)
 		}
+		if err := syncProvisionDirectory(current); err != nil {
+			return fmt.Errorf("sync created directory %s: %w", current, err)
+		}
+		if err := syncProvisionDirectory(filepath.Dir(current)); err != nil {
+			return fmt.Errorf("sync parent directory for %s: %w", current, err)
+		}
 		if err := store.MarkApplied(journal, actionIndex); err != nil {
 			return fmt.Errorf("record created directory %s: %w", current, err)
 		}
 	}
 
 	return nil
+}
+
+func syncProvisionDirectory(path string) error {
+	directory, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+
+	return directory.Sync()
 }
 
 func installImmutableFileJournaled(
