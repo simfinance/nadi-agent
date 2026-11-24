@@ -852,12 +852,16 @@ func validateConfig(config Config) error {
 
 	seenIDs := make(map[string]struct{}, len(config.Applications))
 	seenKeys := make(map[string]struct{}, len(config.Applications))
+	seenUIDs := make(map[int]struct{}, len(config.Applications))
 	seenCredentialPaths := make(map[string]struct{}, len(config.Applications))
 	seenActivationPaths := make(map[string]struct{}, len(config.Applications))
+	seenBasePaths := make([]string, 0, len(config.Applications))
 
 	for _, mapping := range config.Applications {
-		if mapping.ApplicationID == "" || mapping.ApplicationKey == "" {
-			return errors.New("application mapping identity must not be empty")
+		if !isCanonicalUUID(mapping.ApplicationID) ||
+			mapping.ApplicationKey == "" ||
+			len(mapping.ApplicationKey) > 100 {
+			return errors.New("application mapping identity is invalid")
 		}
 
 		if _, duplicate := seenIDs[mapping.ApplicationID]; duplicate {
@@ -873,6 +877,10 @@ func validateConfig(config Config) error {
 		if mapping.RuntimeUID < 1 || mapping.RuntimeGID < 1 {
 			return errors.New("application runtime UID and GID must be positive")
 		}
+		if _, duplicate := seenUIDs[mapping.RuntimeUID]; duplicate {
+			return errors.New("application runtime UIDs must be distinct")
+		}
+		seenUIDs[mapping.RuntimeUID] = struct{}{}
 
 		if !filepath.IsAbs(mapping.BasePath) ||
 			!filepath.IsAbs(mapping.CredentialFile) ||
@@ -884,9 +892,20 @@ func validateConfig(config Config) error {
 		credentialPath := filepath.Clean(mapping.CredentialFile)
 		activationPath := filepath.Clean(mapping.ActivationStateFile)
 
-		if basePath != mapping.BasePath || credentialPath != mapping.CredentialFile || activationPath != mapping.ActivationStateFile {
-			return errors.New("application mapping paths must already be canonical")
+		if basePath != mapping.BasePath ||
+			credentialPath != mapping.CredentialFile ||
+			activationPath != mapping.ActivationStateFile ||
+			basePath == string(os.PathSeparator) {
+			return errors.New("application mapping paths must already be canonical and non-root")
 		}
+		for _, existingPath := range seenBasePaths {
+			if basePath == existingPath ||
+				strings.HasPrefix(basePath, existingPath+string(os.PathSeparator)) ||
+				strings.HasPrefix(existingPath, basePath+string(os.PathSeparator)) {
+				return errors.New("application base paths must not overlap")
+			}
+		}
+		seenBasePaths = append(seenBasePaths, basePath)
 
 		expectedCredentialPath := filepath.Join(
 			"/var/lib/nadi-bridge",
@@ -897,8 +916,12 @@ func validateConfig(config Config) error {
 			return errors.New("credential destination must use the fixed root-owned NADI Bridge credential directory")
 		}
 
-		if filepath.Dir(activationPath) != "/run/nadi-agent/bridge-state" {
-			return errors.New("activation assertion destination is outside the fixed runtime directory")
+		expectedActivationPath := filepath.Join(
+			"/run/nadi-agent/bridge-state",
+			mapping.ApplicationID+".json",
+		)
+		if activationPath != expectedActivationPath {
+			return errors.New("activation assertion destination must use the fixed application identity path")
 		}
 
 		if _, duplicate := seenCredentialPaths[credentialPath]; duplicate {
@@ -922,4 +945,28 @@ func (s *Server) writeResponse(connection net.Conn, response Response) {
 	}
 
 	_, _ = connection.Write(append(payload, '\n'))
+}
+
+
+func isCanonicalUUID(value string) bool {
+    if len(value) != 36 {
+        return false
+    }
+
+    for index, character := range value {
+        switch index {
+        case 8, 13, 18, 23:
+            if character != '-' {
+                return false
+            }
+        default:
+            if !((character >= '0' && character <= '9') ||
+                (character >= 'a' && character <= 'f') ||
+                (character >= 'A' && character <= 'F')) {
+                return false
+            }
+        }
+    }
+
+    return true
 }
