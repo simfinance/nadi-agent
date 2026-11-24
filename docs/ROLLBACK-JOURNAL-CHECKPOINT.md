@@ -31,10 +31,10 @@ An intent without a post-operation fingerprint is ambiguous. The helper must pre
 
 ## Deliberate exclusions
 
-- Account/group creation and systemd state are not automatically reversed by this first journal increment.
+- Account/group creation is retained and is not automatically reversed. RESTORE journals only transaction-created systemd drop-in files and directories; `systemctl daemon-reload` itself is not reversible and service activation is not performed by this transaction.
 - A file or directory with an incomplete fingerprint is never deleted automatically.
 - Non-empty directories are not recursively removed.
-- Existing resources are never recorded as transaction-created resources.
+- Existing resources are never recorded as transaction-created resources. An existing immutable file is accepted only when its owner, group, mode, size, and bytes exactly match the expected artifact; mismatches are rejected without replacement.
 - Enrollment and any Central-side effects are outside local rollback. Once enrollment may have been submitted, preserve Agent state and require identity reconciliation instead of rollback or re-enrollment.
 
 ## Initial integration requirements — current status
@@ -73,4 +73,4 @@ A stale or malformed journal must block another install attempt until explicitly
 - [ ] Add root/non-root/systemd end-to-end coverage on a disposable Linux host.
 - [ ] Confirm the Bridge adapter handles `rolled_back`, `recovery_required`, and retained committed-journal responses without prompting for a new token.
 
-The current implementation is an integrated first increment for the reversible fresh-install filesystem phase only. It does not make account creation reversible, does not roll back Central enrollment, and does not yet make RESTORE or the complete three-operation lifecycle transactionally recoverable.
+The current implementation provides journal coverage for the fresh-install filesystem phase and the local filesystem mutations performed by identity RESTORE. RESTORE preserves the existing Agent state and credentials, and rollback is limited to fingerprint-matching resources created by that RESTORE transaction. It does not make account creation reversible, does not reverse the systemd daemon-reload operation, does not roll back Central enrollment, and does not make the complete three-operation lifecycle transactionally recoverable. The RESTORE path and its new immutable-file tests remain unvalidated by CI until the current GitHub Actions run is approved and completed.
