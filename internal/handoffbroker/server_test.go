@@ -330,7 +330,6 @@ func TestValidateConfigAcceptsRootOwnedExternalCredentialDirectory(t *testing.T)
 	}
 }
 
-
 func TestValidateConfigRejectsDuplicateRuntimeUIDs(t *testing.T) {
 	first := Mapping{
 		ApplicationID:       "00000000-0000-4000-8000-000000000001",

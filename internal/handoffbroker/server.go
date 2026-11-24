@@ -947,7 +947,6 @@ func (s *Server) writeResponse(connection net.Conn, response Response) {
 	_, _ = connection.Write(append(payload, '\n'))
 }
 
-
 func isCanonicalUUID(value string) bool {
 	if len(value) != 36 {
 		return false
