@@ -18,6 +18,7 @@ const (
 	brokerDropInFileMode  os.FileMode = 0644
 	bridgeDirectoryMode   os.FileMode = 0711
 	systemDirectoryMode   os.FileMode = 0755
+	nadiConfigDirectoryMode os.FileMode = 0750
 )
 
 // InstallBrokerArtifacts installs only the fixed broker mapping, per-application
@@ -104,7 +105,7 @@ func installBrokerArtifactsAt(
 	if err := ensureDirectoryTree(
 		root,
 		filepath.Dir(mappingPath),
-		systemDirectoryMode,
+		nadiConfigDirectoryMode,
 		ownerUID,
 		ownerGID,
 	); err != nil {
