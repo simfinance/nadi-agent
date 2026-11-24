@@ -332,6 +332,25 @@ func (s *provisionJournalStore) AddIntent(journal *provisionJournal, kind string
 	return index, nil
 }
 
+func (s *provisionJournalStore) MarkRetained(journal *provisionJournal, index int) error {
+    if journal == nil || index < 0 || index >= len(journal.Actions) {
+        return errors.New("provisioning journal action index is invalid")
+    }
+    action := &journal.Actions[index]
+    if action.Kind != "account" || action.State != "intent" {
+        return errors.New("only an intended fixed service account action can be retained")
+    }
+
+    action.State = "retained"
+    journal.UpdatedAt = time.Now().UTC()
+    if err := s.Save(*journal); err != nil {
+        action.State = "intent"
+        return err
+    }
+
+    return nil
+}
+
 func (s *provisionJournalStore) MarkApplied(journal *provisionJournal, index int) error {
 	if journal == nil || index < 0 || index >= len(journal.Actions) {
 		return errors.New("provisioning journal action index is invalid")
