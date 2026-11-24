@@ -137,3 +137,22 @@ func TestEnrollmentTokenPatternRejectsWhitespace(t *testing.T) {
 		t.Fatal("enrollment token with trailing whitespace must be rejected")
 	}
 }
+func TestSameApplicationInventoryIgnoresOrderButChecksEveryIdentityField(t *testing.T) {
+    installed := []ProvisionApplication{
+        {ApplicationKey: "application-one", BasePath: "/srv/www/one", RuntimeUID: 1001, RuntimeGID: 1001},
+        {ApplicationKey: "application-two", BasePath: "/srv/www/two", RuntimeUID: 1002, RuntimeGID: 1002},
+    }
+    requested := []ProvisionApplication{
+        installed[1],
+        installed[0],
+    }
+
+    if !sameApplicationInventory(installed, requested) {
+        t.Fatal("the same application inventory in a different order must be accepted")
+    }
+
+    requested[0].RuntimeUID = 2002
+    if sameApplicationInventory(installed, requested) {
+        t.Fatal("a changed runtime UID must invalidate the existing inventory")
+    }
+}
