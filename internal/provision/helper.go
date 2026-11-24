@@ -22,7 +22,6 @@ import (
 
 	_ "embed"
 
-	"nadi-agent/internal/handoffbroker"
 )
 
 const (
@@ -108,6 +107,13 @@ func RunPrivileged(reader io.Reader, writer io.Writer, errorWriter io.Writer) in
 
 	if filepath.Base(request.Release.ArtifactPath) != artifact.Filename {
 		response.Message = "Staged Agent artifact filename does not match the signed release manifest."
+		writeHelperResponse(writer, response)
+		fmt.Fprintln(errorWriter, response.Message)
+		return 1
+	}
+
+	if err := validateApplicationTargets(request); err != nil {
+		response.Message = safeHelperMessage(err)
 		writeHelperResponse(writer, response)
 		fmt.Fprintln(errorWriter, response.Message)
 		return 1
@@ -221,6 +227,61 @@ func RunPrivileged(reader io.Reader, writer io.Writer, errorWriter io.Writer) in
 	writeHelperResponse(writer, response)
 
 	return 0
+}
+
+func ensureNoSymlinkPath(path string) error {
+	if !filepath.IsAbs(path) {
+		return errors.New("path must be absolute")
+	}
+
+	current := string(os.PathSeparator)
+	segments := strings.Split(strings.TrimPrefix(path, string(os.PathSeparator)), string(os.PathSeparator))
+
+	for _, segment := range segments {
+		if segment == "" {
+			continue
+		}
+
+		current = filepath.Join(current, segment)
+		metadata, err := os.Lstat(current)
+		if err != nil {
+			return fmt.Errorf("inspect path component: %w", err)
+		}
+
+		if metadata.Mode()&os.ModeSymlink != 0 || !metadata.IsDir() {
+			return errors.New("path contains a symlink or non-directory component")
+		}
+	}
+
+	return nil
+}
+
+func validateApplicationTargets(request ProvisionRequest) error {
+	for index, application := range request.Applications {
+		if err := ensureNoSymlinkPath(application.BasePath); err != nil {
+			return fmt.Errorf("application %d base path is unsafe: %w", index, err)
+		}
+
+		resolvedPath, err := filepath.EvalSymlinks(application.BasePath)
+		if err != nil || resolvedPath != application.BasePath {
+			return fmt.Errorf("application %d base path is not canonical", index)
+		}
+
+		artisanPath := filepath.Join(application.BasePath, "artisan")
+		artisanMetadata, err := os.Lstat(artisanPath)
+		if err != nil || artisanMetadata.Mode()&os.ModeSymlink != 0 || !artisanMetadata.Mode().IsRegular() {
+			return fmt.Errorf("application %d does not contain a regular Laravel artisan entrypoint", index)
+		}
+
+		if _, err := user.LookupId(strconv.Itoa(application.RuntimeUID)); err != nil {
+			return fmt.Errorf("application %d runtime user does not exist", index)
+		}
+		if _, err := user.LookupGroupId(strconv.Itoa(application.RuntimeGID)); err != nil {
+			return fmt.Errorf("application %d runtime group does not exist", index)
+		}
+	}
+
+	return nil
 }
 
 func validateStagedArtifactOwner(request ProvisionRequest) error {
