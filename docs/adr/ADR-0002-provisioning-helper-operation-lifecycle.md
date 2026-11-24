@@ -92,13 +92,14 @@ Expected result:
 
 ## Bridge adapter sequence
 
-The Bridge installer invokes the three fixed operations in order:
+The Bridge installer invokes the fixed operations in order for a fresh installation:
 
 1. `install_agent`
-2. `enroll_agent`
-3. `start_agent`
+2. Prompt for the one-time token only after `install_agent` confirms a fresh install.
+3. `enroll_agent`
+4. `start_agent`
 
-It must stop immediately on a failed phase. On a repeated install, a verified existing enrollment may be reported by `install_agent`; the Bridge still invokes `enroll_agent`, which must return the matching verified completion idempotently, before calling `start_agent`. If enrollment has an unknown outcome without a verified completion record, the Bridge must display the bounded non-secret status and explicitly prohibit a fresh-token retry until local Agent state and Central registration are reconciled.
+It must stop immediately on a failed phase. On a repeated install, `install_agent` may return `phase=enrolled` only when the root-owned inventory, enrollment-attempt marker, completion record, release version, and application mapping all match. In that verified recovery case, the Bridge must not prompt for or send a new enrollment token and proceeds directly to `start_agent`. If enrollment has an unknown outcome without a verified completion record, the Bridge must display the bounded non-secret status and explicitly prohibit a fresh-token retry until local Agent state and Central registration are reconciled.
 
 The Bridge adapter must not modify Laravel, PHP-FPM, Nginx, firewall, Supervisor, or client application configuration without the explicit configuration approval required by the Master Architecture.
 
