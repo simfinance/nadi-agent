@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"os"
 	"os/user"
-	"reflect"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -259,7 +258,7 @@ func runInstallAgentOperation(request ProvisionOperationRequest, response Helper
 		completion, completionErr := readProvisionCompletion()
 		if inventoryErr == nil && completionErr == nil &&
 			inventory.AgentVersion == releaseManifest.Version &&
-			reflect.DeepEqual(inventory.Applications, request.Applications) &&
+			sameApplicationInventory(inventory.Applications, request.Applications) &&
 			completion.AgentVersion == inventory.AgentVersion &&
 			completion.ApplicationCount == len(inventory.Applications) {
 			response.Success = true
@@ -536,6 +535,36 @@ func decodeProvisionEnrollmentManifest(content []byte) (provisionEnrollmentManif
 		return provisionEnrollmentManifest{}, errors.New("enrollment manifest must contain 1 to 20 applications")
 	}
 	return manifest, nil
+}
+
+func sameApplicationInventory(installed []ProvisionApplication, requested []ProvisionApplication) bool {
+	if len(installed) != len(requested) {
+		return false
+	}
+
+	byKey := make(map[string]ProvisionApplication, len(installed))
+	for _, application := range installed {
+		if application.ApplicationKey == "" {
+			return false
+		}
+		if _, exists := byKey[application.ApplicationKey]; exists {
+			return false
+		}
+		byKey[application.ApplicationKey] = application
+	}
+
+	for _, application := range requested {
+		existing, exists := byKey[application.ApplicationKey]
+		if !exists ||
+			existing.BasePath != application.BasePath ||
+			existing.RuntimeUID != application.RuntimeUID ||
+			existing.RuntimeGID != application.RuntimeGID {
+			return false
+		}
+		delete(byKey, application.ApplicationKey)
+	}
+
+	return len(byKey) == 0
 }
 
 func matchEnrollmentManifestToInventory(manifest provisionEnrollmentManifest, inventory provisionInventory) error {
