@@ -581,6 +581,10 @@ func restoreExistingAgentIdentity(
 		return cause
 	}
 
+	if err := prepareAgentDirectoriesJournaled(identity, store, &journal); err != nil {
+		return rollbackFailure(fmt.Errorf("prepare canonical Agent directories for identity restore: %w", err))
+	}
+
 	if err := installAgentAssetsJournaled(
 		request.Release.ArtifactPath,
 		artifactSHA256,
