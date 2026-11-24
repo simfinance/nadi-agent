@@ -1,158 +1,141 @@
 package provision
 
 import (
-	"bytes"
-	"encoding/base64"
-	"encoding/json"
-	"strings"
-	"testing"
+    "bytes"
+    "encoding/base64"
+    "encoding/json"
+    "strings"
+    "testing"
 )
 
-func TestDecodeProvisionRequestAcceptsMultipleApplications(t *testing.T) {
-	enrollmentManifest, err := json.Marshal(provisionEnrollmentManifest{
-		Applications: []provisionManifestApplication{
-			{ApplicationKey: "application-one", ApplicationName: "Application One", Environment: "production", BaseURL: "https://one.example.test"},
-			{ApplicationKey: "application-two", ApplicationName: "Application Two", Environment: "staging", BaseURL: "https://two.example.test"},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestValidateInstallOperationRejectsDuplicateRuntimeUID(t *testing.T) {
+    request := validInstallOperationRequest()
+    request.Applications[1].RuntimeUID = request.Applications[0].RuntimeUID
 
-	request := ProvisionRequest{
-		ProtocolVersion: 1,
-		Operation:       "install_agent",
-		Release: ProvisionReleaseRequest{
-			ManifestBase64:  base64.StdEncoding.EncodeToString([]byte(`{"schema_version":1}`)),
-			SignatureBase64: "signed-manifest-signature",
-			ArtifactPath:    "/var/tmp/nadi-agent",
-		},
-		Applications: []ProvisionApplication{
-			{
-				ApplicationKey: "application-one",
-				BasePath:       "/srv/www/application-one",
-				RuntimeUID:     1001,
-				RuntimeGID:     1001,
-			},
-			{
-				ApplicationKey: "application-two",
-				BasePath:       "/srv/www/application-two",
-				RuntimeUID:     1002,
-				RuntimeGID:     1002,
-			},
-		},
-		Enrollment: ProvisionEnrollment{
-			ManifestBase64: base64.StdEncoding.EncodeToString(enrollmentManifest),
-			Token:          "nadi_enroll_" + strings.Repeat("a", 64),
-		},
-	}
-
-	content, err := json.Marshal(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	decoded, releaseManifest, decodedEnrollmentManifest, err := DecodeProvisionRequest(bytes.NewReader(content))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(decoded.Applications) != 2 {
-		t.Fatalf("expected two application mappings, got %d", len(decoded.Applications))
-	}
-
-	if string(releaseManifest) != `{"schema_version":1}` {
-		t.Fatalf("unexpected release manifest: %s", releaseManifest)
-	}
-
-	if len(decodedEnrollmentManifest) == 0 || decoded.ProtocolVersion != 1 {
-		t.Fatal("expected a decoded version 1 enrollment request")
-	}
+    if err := validateProvisionOperationRequest(request); err == nil {
+        t.Fatal("duplicate runtime UID must be rejected")
+    }
 }
 
-func TestDecodeProvisionRequestRejectsDuplicateJSONKeys(t *testing.T) {
-	content := []byte(`{"protocol_version":1,"protocol_version":1}`)
+func TestValidateInstallOperationRejectsOverlappingApplicationPaths(t *testing.T) {
+    request := validInstallOperationRequest()
+    request.Applications[1].BasePath = "/srv/www/application-one/nested"
 
-	if _, _, _, err := DecodeProvisionRequest(bytes.NewReader(content)); err == nil {
-		t.Fatal("duplicate JSON keys must be rejected")
-	}
+    if err := validateProvisionOperationRequest(request); err == nil {
+        t.Fatal("overlapping application paths must be rejected")
+    }
 }
 
-func TestValidateProvisionRequestRejectsDuplicateRuntimeUID(t *testing.T) {
-	request := validProvisionRequest(t)
-	request.Applications[1].RuntimeUID = request.Applications[0].RuntimeUID
+func TestDecodeProvisionOperationRejectsOversizedInput(t *testing.T) {
+    content := bytes.NewReader(bytes.Repeat([]byte("x"), maximumProvisionRequestBytes+1))
 
-	if _, _, err := validateProvisionRequest(request); err == nil {
-		t.Fatal("duplicate runtime UID must be rejected")
-	}
+    if _, err := DecodeProvisionOperationRequest(content); err == nil {
+        t.Fatal("oversized provisioning request must be rejected")
+    }
 }
 
-func TestValidateProvisionRequestRejectsOverlappingApplicationPaths(t *testing.T) {
-	request := validProvisionRequest(t)
-	request.Applications[1].BasePath = "/srv/www/application-one/nested"
+func TestDecodeProvisionOperationRejectsDuplicateJSONKeys(t *testing.T) {
+    content := []byte(`{"protocol_version":1,"operation":"start_agent","operation":"install_agent"}`)
 
-	if _, _, err := validateProvisionRequest(request); err == nil {
-		t.Fatal("overlapping application paths must be rejected")
-	}
+    if _, err := DecodeProvisionOperationRequest(bytes.NewReader(content)); err == nil {
+        t.Fatal("duplicate JSON keys must be rejected")
+    }
 }
 
-func TestValidateProvisionRequestRejectsMissingApplicationMapping(t *testing.T) {
-	request := validProvisionRequest(t)
-	request.Applications = request.Applications[:1]
+func TestMatchEnrollmentManifestRejectsMissingApplicationMapping(t *testing.T) {
+    inventory := provisionInventory{
+        ProtocolVersion: 1,
+        AgentVersion: "0.7.5",
+        Applications: []ProvisionApplication{
+            {ApplicationKey: "application-one", BasePath: "/srv/www/one", RuntimeUID: 1001, RuntimeGID: 1001},
+            {ApplicationKey: "application-two", BasePath: "/srv/www/two", RuntimeUID: 1002, RuntimeGID: 1002},
+        },
+    }
+    manifest := provisionEnrollmentManifest{
+        Applications: []provisionManifestApplication{
+            {ApplicationKey: "application-one", ApplicationName: "One", Environment: "production", BaseURL: "https://one.example.test"},
+        },
+    }
 
-	if _, _, err := validateProvisionRequest(request); err == nil {
-		t.Fatal("missing application mapping must be rejected")
-	}
+    if err := matchEnrollmentManifestToInventory(manifest, inventory); err == nil {
+        t.Fatal("manifest missing an installed application must be rejected")
+    }
 }
 
-func TestDecodeProvisionRequestRejectsOversizedInput(t *testing.T) {
-	content := bytes.NewReader(bytes.Repeat([]byte("x"), maximumProvisionRequestBytes+1))
+func TestMatchEnrollmentManifestRejectsNonHTTPSURL(t *testing.T) {
+    inventory := provisionInventory{
+        ProtocolVersion: 1,
+        AgentVersion: "0.7.5",
+        Applications: []ProvisionApplication{
+            {ApplicationKey: "application-one", BasePath: "/srv/www/one", RuntimeUID: 1001, RuntimeGID: 1001},
+        },
+    }
+    manifest := provisionEnrollmentManifest{
+        Applications: []provisionManifestApplication{
+            {ApplicationKey: "application-one", ApplicationName: "One", Environment: "production", BaseURL: "http://one.example.test"},
+        },
+    }
 
-	if _, _, _, err := DecodeProvisionRequest(content); err == nil {
-		t.Fatal("oversized provisioning request must be rejected")
-	}
+    if err := matchEnrollmentManifestToInventory(manifest, inventory); err == nil {
+        t.Fatal("non-HTTPS application URL must be rejected")
+    }
 }
 
-func validProvisionRequest(t *testing.T) ProvisionRequest {
-	t.Helper()
+func TestValidateEnrollmentOperationRequiresOneTimeToken(t *testing.T) {
+    request := ProvisionOperationRequest{
+        ProtocolVersion: 1,
+        Operation: "enroll_agent",
+        Enrollment: &ProvisionEnrollment{
+            ManifestBase64: base64.StdEncoding.EncodeToString([]byte(`{"applications":[]}`)),
+            Token: "invalid-token",
+        },
+    }
 
-	enrollmentManifest := provisionEnrollmentManifest{
-		Applications: []provisionManifestApplication{
-			{ApplicationKey: "application-one", ApplicationName: "Application One", Environment: "production", BaseURL: "https://one.example.test"},
-			{ApplicationKey: "application-two", ApplicationName: "Application Two", Environment: "staging", BaseURL: "https://two.example.test"},
-		},
-	}
-
-	manifestJSON, err := json.Marshal(enrollmentManifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return ProvisionRequest{
-		ProtocolVersion: 1,
-		Operation:       "install_agent",
-		Release: ProvisionReleaseRequest{
-			ManifestBase64:  base64.StdEncoding.EncodeToString([]byte(`{"schema_version":1}`)),
-			SignatureBase64: "signed-manifest-signature",
-			ArtifactPath:    "/var/tmp/nadi-agent",
-		},
-		Applications: []ProvisionApplication{
-			{
-				ApplicationKey: "application-one",
-				BasePath:       "/srv/www/application-one",
-				RuntimeUID:     1001,
-				RuntimeGID:     1001,
-			},
-			{
-				ApplicationKey: "application-two",
-				BasePath:       "/srv/www/application-two",
-				RuntimeUID:     1002,
-				RuntimeGID:     1002,
-			},
-		},
-		Enrollment: ProvisionEnrollment{
-			ManifestBase64: base64.StdEncoding.EncodeToString(manifestJSON),
-			Token:          "nadi_enroll_" + strings.Repeat("a", 64),
-		},
-	}
+    if err := validateProvisionOperationRequest(request); err == nil {
+        t.Fatal("invalid one-time enrollment token must be rejected")
+    }
 }
+
+func TestValidateInstallOperationRequiresUniqueApplicationKeys(t *testing.T) {
+    request := validInstallOperationRequest()
+    request.Applications[1].ApplicationKey = request.Applications[0].ApplicationKey
+
+    if err := validateProvisionOperationRequest(request); err == nil {
+        t.Fatal("duplicate application keys must be rejected")
+    }
+}
+
+func validInstallOperationRequest() ProvisionOperationRequest {
+    return ProvisionOperationRequest{
+        ProtocolVersion: 1,
+        Operation: "install_agent",
+        Release: &ProvisionReleaseRequest{
+            ManifestBase64: base64.StdEncoding.EncodeToString([]byte(`{"schema_version":1}`)),
+            SignatureBase64: "signature",
+            ArtifactPath: "/srv/www/application-one/storage/app/private/nadi/releases/staging/nadi-agent",
+        },
+        Applications: []ProvisionApplication{
+            {
+                ApplicationKey: "application-one",
+                BasePath: "/srv/www/application-one",
+                RuntimeUID: 1001,
+                RuntimeGID: 1001,
+            },
+            {
+                ApplicationKey: "application-two",
+                BasePath: "/srv/www/application-two",
+                RuntimeUID: 1002,
+                RuntimeGID: 1002,
+            },
+        },
+    }
+}
+
+func TestEnrollmentTokenPatternRejectsWhitespace(t *testing.T) {
+    token := "nadi_enroll_" + strings.Repeat("a", 64) + " "
+    if enrollmentTokenPattern.MatchString(token) {
+        t.Fatal("enrollment token with trailing whitespace must be rejected")
+    }
+}
+
+var _ = json.Valid
