@@ -499,7 +499,105 @@ func ensureAgentAccount() (helperRuntimeIdentity, error) {
 		return helperRuntimeIdentity{}, errors.New("dedicated NADI account must use its fixed primary group")
 	}
 
+	if account.HomeDir != agentStateDirectory {
+		return helperRuntimeIdentity{}, errors.New("existing NADI service account has an unexpected home directory")
+	}
+	if err := validateAgentPasswdEntry(uid, groupID); err != nil {
+		return helperRuntimeIdentity{}, err
+	}
+	if err := validateAgentGroupEntry(groupID); err != nil {
+		return helperRuntimeIdentity{}, err
+	}
+
+	groupIDs, err := account.GroupIds()
+	if err != nil {
+		return helperRuntimeIdentity{}, fmt.Errorf("inspect NADI service account group memberships: %w", err)
+	}
+	for _, supplementaryGroupID := range groupIDs {
+		if supplementaryGroupID != strconv.Itoa(groupID) {
+			return helperRuntimeIdentity{}, errors.New("NADI service account must not belong to supplementary groups")
+		}
+	}
+
 	return helperRuntimeIdentity{uid: uid, gid: groupID}, nil
+}
+
+func validateAgentPasswdEntry(expectedUID int, expectedGID int) error {
+	content, err := readRootOwnedSystemFile("/etc/passwd", 1<<20)
+	if err != nil {
+		return err
+	}
+
+	for _, line := range strings.Split(string(content), "\n") {
+		fields := strings.Split(line, ":")
+		if len(fields) != 7 || fields[0] != agentAccountName {
+			continue
+		}
+
+		uid, uidErr := strconv.Atoi(fields[2])
+		gid, gidErr := strconv.Atoi(fields[3])
+		if uidErr != nil || gidErr != nil || uid != expectedUID || gid != expectedGID {
+			return errors.New("NADI service account passwd identity does not match the resolved UID/GID")
+		}
+		if fields[5] != agentStateDirectory {
+			return errors.New("NADI service account home directory does not match the fixed Agent state directory")
+		}
+		if fields[6] != "/usr/sbin/nologin" && fields[6] != "/sbin/nologin" {
+			return errors.New("NADI service account must use a non-login shell")
+		}
+
+		return nil
+	}
+
+	return errors.New("NADI service account passwd entry is missing")
+}
+
+func validateAgentGroupEntry(expectedGID int) error {
+	content, err := readRootOwnedSystemFile("/etc/group", 1<<20)
+	if err != nil {
+		return err
+	}
+
+	for _, line := range strings.Split(string(content), "\n") {
+		fields := strings.Split(line, ":")
+		if len(fields) != 4 || fields[0] != agentAccountName {
+			continue
+		}
+
+		gid, gidErr := strconv.Atoi(fields[2])
+		if gidErr != nil || gid != expectedGID {
+			return errors.New("NADI service group GID does not match the resolved primary group")
+		}
+		if fields[3] != "" {
+			return errors.New("NADI service group must not contain supplementary members")
+		}
+
+		return nil
+	}
+
+	return errors.New("NADI service group entry is missing")
+}
+
+func readRootOwnedSystemFile(path string, maximumSize int64) ([]byte, error) {
+	metadata, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("inspect %s: %w", path, err)
+	}
+	if metadata.Mode()&os.ModeSymlink != 0 || !metadata.Mode().IsRegular() || metadata.Size() < 1 || metadata.Size() > maximumSize {
+		return nil, fmt.Errorf("%s must be a bounded regular non-symlink file", path)
+	}
+
+	stat, ok := metadata.Sys().(*syscall.Stat_t)
+	if !ok || stat.Uid != 0 || metadata.Mode().Perm()&0022 != 0 {
+		return nil, fmt.Errorf("%s must be root-owned and not group/other writable", path)
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+
+	return content, nil
 }
 
 func prepareAgentDirectories(identity helperRuntimeIdentity) error {
