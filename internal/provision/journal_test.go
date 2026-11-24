@@ -124,6 +124,45 @@ func TestProvisionJournalRecoversAppliedFileAfterReload(t *testing.T) {
 	}
 }
 
+func TestProvisionJournalRecoveryIsIdempotentAfterResourceRemoval(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "provisioning-journal.json")
+	target := filepath.Join(directory, "created-file")
+
+	store, journal, err := newProvisionJournalForOperation(journalPath, "restore_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	index, err := store.AddIntent(&journal, "file", target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("created by interrupted RESTORE"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkApplied(&journal, index); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Remove(target); err != nil {
+		t.Fatalf("simulate crash after resource removal: %v", err)
+	}
+
+	reloadedStore, reloadedJournal, err := openProvisionJournal(journalPath)
+	if err != nil {
+		t.Fatalf("reload interrupted RESTORE journal: %v", err)
+	}
+	if err := reloadedStore.Rollback(&reloadedJournal, []string{directory}); err != nil {
+		t.Fatalf("recovery must accept an already-removed transaction resource: %v", err)
+	}
+
+	if reloadedJournal.Phase != "rolled_back" ||
+		reloadedJournal.Actions[index].State != "rolled_back" {
+		t.Fatalf("recovery did not persist the idempotent rollback result: %#v", reloadedJournal)
+	}
+}
+
 func TestProvisionJournalRecoveryPreservesUnfingerprintedIntent(t *testing.T) {
 	directory := t.TempDir()
 	journalPath := filepath.Join(directory, "provisioning-journal.json")
