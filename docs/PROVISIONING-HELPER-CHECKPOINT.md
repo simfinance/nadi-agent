@@ -184,7 +184,7 @@ The canonical path decision is resolved by ADR-0001 and the source migration is 
 - [x] Latest Bridge CI validation passed. Workflow #45309364276: https://github.com/simfinance/nadi-laravel-agent/actions/runs/45309364276.
 
 Latest Agent source/test commit: `922e06ff0f4ccb4c189b424cae4d3a48402264d6`.
-Latest Agent branch head at this checkpoint (before any formatter-only commit): `922e06ff0f4ccb4c189b424cae4d3a48402264d6`.
+Latest Agent branch head at this checkpoint (documentation included): `b423bae95715de1e64604fac87570d6acc65e82b`.
 Latest Bridge branch head: `5fd0a0159d3ee66a6dfa9a8138d266bc62f60332`.
 
 The failed run is a real test failure, not a code-formatting issue. Do not mark the Agent path migration CI-passed until a run against the corrected branch head completes successfully.
