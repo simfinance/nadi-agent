@@ -58,7 +58,7 @@ func TestDecodeProvisionOperationRejectsEnrollmentFieldsDuringInstall(t *testing
         }],
         "enrollment": {
             "manifest_base64": "e30=",
-            "token": "nadi_enroll_` + strings.Repeat("a", 64) + `"
+            "token": "not-allowed"
         }
     }`)
 
