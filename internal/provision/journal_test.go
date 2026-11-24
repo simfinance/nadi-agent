@@ -456,3 +456,61 @@ func TestProvisionJournalRejectsSymlinkedResourceParent(t *testing.T) {
 		t.Fatal("resource with a symlinked parent directory must be rejected")
 	}
 }
+
+func TestProvisionJournalRollbackStopsBeforeRemovingEarlierResources(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "provisioning-journal.json")
+	createdDirectory := filepath.Join(directory, "created-directory")
+	createdFile := filepath.Join(createdDirectory, "created-file")
+
+	store, journal, err := newProvisionJournal(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	directoryIndex, err := store.AddIntent(&journal, "directory", createdDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(createdDirectory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkApplied(&journal, directoryIndex); err != nil {
+		t.Fatal(err)
+	}
+
+	fileIndex, err := store.AddIntent(&journal, "file", createdFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(createdFile, []byte("original transaction content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkApplied(&journal, fileIndex); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(createdFile, []byte("modified by another actor"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Rollback(&journal, []string{directory}); err == nil {
+		t.Fatal("rollback must stop when the most recent resource no longer matches its fingerprint")
+	}
+
+	if _, err := os.Lstat(createdFile); err != nil {
+		t.Fatalf("modified file must be preserved: %v", err)
+	}
+	if _, err := os.Lstat(createdDirectory); err != nil {
+		t.Fatalf("earlier directory must remain when reverse rollback stops: %v", err)
+	}
+	if journal.Phase != "rollback_required" {
+		t.Fatalf("partial rollback must remain recoverable, got phase %q", journal.Phase)
+	}
+	if journal.Actions[directoryIndex].State != "applied" {
+		t.Fatalf("earlier directory action must remain applied, got %q", journal.Actions[directoryIndex].State)
+	}
+	if journal.Actions[fileIndex].State != "applied" {
+		t.Fatalf("modified file action must remain applied, got %q", journal.Actions[fileIndex].State)
+	}
+}
