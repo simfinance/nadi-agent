@@ -121,6 +121,15 @@ The new code is in `internal/provision/broker_artifacts.go` and `internal/provis
 
 Files: `internal/provision/broker_artifact_install.go` and `internal/provision/broker_artifact_install_test.go`.
 
+## Architecture path alignment blocker found on specification re-review
+
+The Master Architecture Technical Specification v1.0 section 10.4 lists these baseline directories:
+`/opt/nadi`, `/etc/nadi`, `/var/lib/nadi`, `/var/log/nadi`, and `/run/nadi`.
+
+The current Agent implementation and systemd assets use Agent-specific paths such as `/opt/nadi-agent`, `/etc/nadi-agent`, `/var/lib/nadi-agent`, and `/run/nadi-agent`. The Agent-side specification does not explicitly resolve this directory naming difference.
+
+This must be resolved as an explicit architecture/path decision before completing the root provisioning helper. Do not silently rename existing paths or write a helper that makes the divergence permanent. The Bridge credential root `/var/lib/nadi-bridge/{application_id}` is a separate security boundary and is not replaced by the Agent state directory.
+
 ## Current implementation gaps
 
 - [ ] Root-owned `nadi-provision` executable and strict request parser.
