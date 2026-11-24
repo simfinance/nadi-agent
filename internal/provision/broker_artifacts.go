@@ -14,7 +14,7 @@ import (
 
 const (
 	maximumEnrollmentSummaryBytes = 16 * 1024
-	brokerMappingPath             = "/etc/nadi-agent/bridge-mappings.json"
+	brokerMappingPath             = "/etc/nadi/bridge-mappings.json"
 	brokerDropInPath              = "/etc/systemd/system/nadi-handoff-broker.service.d/bridge-credentials.conf"
 )
 
@@ -125,7 +125,7 @@ func BuildBrokerArtifacts(
 			RuntimeUID:          local.RuntimeUID,
 			RuntimeGID:          local.RuntimeGID,
 			CredentialFile:      "/var/lib/nadi-bridge/" + application.ApplicationID + "/credential",
-			ActivationStateFile: "/run/nadi-agent/bridge-state/" + application.ApplicationID + ".json",
+			ActivationStateFile: "/run/nadi/bridge-state/" + application.ApplicationID + ".json",
 		})
 	}
 
@@ -138,7 +138,7 @@ func BuildBrokerArtifacts(
 	})
 
 	if _, err := handoffbroker.NewServer(
-		"/run/nadi-agent/credential-handoff.sock",
+		"/run/nadi/credential-handoff.sock",
 		config,
 	); err != nil {
 		return handoffbroker.Config{}, nil, "", fmt.Errorf("validate reconciled broker mapping: %w", err)
@@ -163,7 +163,7 @@ func BuildBrokerArtifacts(
 // per-application credential directories represented by a validated mapping.
 func BuildBrokerDropIn(config handoffbroker.Config) (string, error) {
 	if _, err := handoffbroker.NewServer(
-		"/run/nadi-agent/credential-handoff.sock",
+		"/run/nadi/credential-handoff.sock",
 		config,
 	); err != nil {
 		return "", fmt.Errorf("invalid broker mapping for systemd drop-in: %w", err)
