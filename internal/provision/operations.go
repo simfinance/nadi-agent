@@ -2,11 +2,14 @@ package provision
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -19,6 +22,7 @@ import (
 const (
 	provisionInventoryPath         = "/etc/nadi/provisioning-inventory.json"
 	provisionCompletePath          = "/etc/nadi/provisioning-complete.json"
+	provisionAttemptPath           = "/etc/nadi/provisioning-enrollment-attempt.json"
 	maximumEnrollmentManifestBytes = 32 * 1024
 )
 
@@ -41,6 +45,12 @@ type provisionCompletion struct {
 	AgentVersion     string `json:"agent_version"`
 	ApplicationCount int    `json:"application_count"`
 	EnrollmentStatus string `json:"enrollment_status"`
+}
+
+type provisionEnrollmentAttempt struct {
+	ProtocolVersion  int    `json:"protocol_version"`
+	ManifestSHA256   string `json:"manifest_sha256"`
+	ApplicationCount int    `json:"application_count"`
 }
 
 func DecodeProvisionOperationRequest(reader io.Reader) (ProvisionOperationRequest, error) {
@@ -204,8 +214,22 @@ func runInstallAgentOperation(request ProvisionOperationRequest, response Helper
 	if err := VerifyReleaseArtifact(request.Release.ArtifactPath, artifact); err != nil {
 		return writeOperationFailure(writer, errorWriter, response, err)
 	}
+	attemptExists, attemptErr := hasProvisionEnrollmentAttempt()
+	if attemptErr != nil {
+		response.Phase = "existing_installation"
+		response.EnrollmentStatus = "unknown"
+		response.RetrySafe = false
+		return writeOperationFailure(writer, errorWriter, response, errors.New("enrollment attempt metadata cannot be safely inspected"))
+	}
+	if attemptExists {
+		response.Phase = "existing_installation"
+		response.EnrollmentStatus = "unknown"
+		response.RetrySafe = false
+		return writeOperationFailure(writer, errorWriter, response, errors.New("an enrollment attempt already exists; do not retry"))
+	}
 	if err := rejectExistingAgentState(); err != nil {
 		response.Phase = "existing_installation"
+		response.RetrySafe = false
 		return writeOperationFailure(writer, errorWriter, response, err)
 	}
 
@@ -267,6 +291,36 @@ func runEnrollAgentOperation(request ProvisionOperationRequest, response HelperR
 		return 0
 	}
 
+	attemptExists, attemptErr := hasProvisionEnrollmentAttempt()
+	if attemptErr != nil {
+		manifestDigest := sha256.Sum256(enrollmentManifestJSON)
+	attempt := provisionEnrollmentAttempt{
+		ProtocolVersion:  1,
+		ManifestSHA256:   hex.EncodeToString(manifestDigest[:]),
+		ApplicationCount: len(inventory.Applications),
+	}
+	attemptJSON, err := json.Marshal(attempt)
+	if err != nil {
+		return writeOperationFailure(writer, errorWriter, response, errors.New("encode enrollment attempt metadata"))
+	}
+	if err := installImmutableFile(provisionAttemptPath, attemptJSON, 0600, 0, 0); err != nil {
+		return writeOperationFailure(writer, errorWriter, response, errors.New("persist enrollment attempt boundary; enrollment was not started"))
+	}
+
+	response.Phase = "enrollment"
+		response.EnrollmentStatus = "unknown"
+		response.RetrySafe = false
+		return writeOperationFailure(writer, errorWriter, response, errors.New("enrollment attempt metadata cannot be safely inspected"))
+	}
+	if attemptExists {
+		response.Phase = "enrollment"
+		response.EnrollmentStatus = "unknown"
+		response.RetrySafe = false
+		response.Message = "A previous enrollment attempt has no verified completion record. Preserve Agent state and reconcile Central registration; do not retry."
+		writeHelperResponse(writer, response)
+		fmt.Fprintln(errorWriter, response.Message)
+		return 1
+	}
 	if _, stateErr := os.Lstat(agentStateFile); stateErr == nil {
 		response.Phase = "enrollment"
 		response.EnrollmentStatus = "unknown"
@@ -279,7 +333,6 @@ func runEnrollAgentOperation(request ProvisionOperationRequest, response HelperR
 		response.Phase = "enrollment"
 		return writeOperationFailure(writer, errorWriter, response, errors.New("existing Agent state cannot be safely inspected"))
 	}
-
 	enrollmentManifestJSON, err := base64.StdEncoding.Strict().DecodeString(request.Enrollment.ManifestBase64)
 	if err != nil || len(enrollmentManifestJSON) == 0 || len(enrollmentManifestJSON) > maximumEnrollmentManifestBytes {
 		return writeOperationFailure(writer, errorWriter, response, errors.New("enrollment manifest is invalid or too large"))
@@ -430,8 +483,14 @@ func matchEnrollmentManifestToInventory(manifest provisionEnrollmentManifest, in
 	}
 	for _, application := range manifest.Applications {
 		if application.ApplicationKey == "" || strings.TrimSpace(application.ApplicationName) == "" ||
-			strings.TrimSpace(application.Environment) == "" {
+			strings.TrimSpace(application.Environment) == "" || len(application.ApplicationKey) > 100 ||
+			len(application.ApplicationName) > 255 || len(application.Environment) > 50 ||
+			len(application.FrameworkVersion) > 50 || len(application.PHPVersion) > 30 {
 			return errors.New("enrollment manifest contains incomplete application identity")
+		}
+		parsedURL, parseErr := url.ParseRequestURI(application.BaseURL)
+		if parseErr != nil || parsedURL.Scheme != "https" || parsedURL.Host == "" || parsedURL.User != nil {
+			return errors.New("enrollment manifest application base_url must be an absolute HTTPS URL without user information")
 		}
 		if _, exists := expected[application.ApplicationKey]; !exists {
 			return errors.New("enrollment manifest contains an application outside the installed inventory")
@@ -511,8 +570,8 @@ func verifyAgentStateFile() error {
 	}
 	stat, ok := metadata.Sys().(*syscall.Stat_t)
 	account, accountErr := user.Lookup(agentAccountName)
-	if !ok || accountErr != nil {
-		return errors.New("dedicated NADI runtime account cannot be verified")
+	if !ok || accountErr != nil || metadata.Mode().Perm()&0077 != 0 {
+		return errors.New("Agent state must be private and the dedicated NADI runtime account must be verifiable")
 	}
 	expectedUID, parseErr := strconv.Atoi(account.Uid)
 	if parseErr != nil || expectedUID < 1 || stat.Uid != uint32(expectedUID) {
