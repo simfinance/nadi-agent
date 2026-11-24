@@ -4,6 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"os"
+	"os/user"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -71,6 +75,62 @@ func TestWriteHelperResponseUsesBoundedProtocolFields(t *testing.T) {
 	}
 	if response["retry_safe"] != false {
 		t.Fatalf("uncertain enrollment must not be marked retry-safe: %#v", response)
+	}
+}
+
+func TestValidateApplicationTargetsRequiresMatchingRootOwnedPHPFPMPool(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("test requires root-owned temporary PHP-FPM configuration files")
+	}
+
+	runtimeUser, err := user.Lookup("www-data")
+	if err != nil {
+		t.Skip("www-data account is not available")
+	}
+	runtimeGroup, err := user.LookupGroup("www-data")
+	if err != nil {
+		t.Skip("www-data group is not available")
+	}
+	uid, err := strconv.Atoi(runtimeUser.Uid)
+	if err != nil || uid < 1 {
+		t.Skip("www-data UID is not a non-root identity")
+	}
+	gid, err := strconv.Atoi(runtimeGroup.Gid)
+	if err != nil || gid < 1 {
+		t.Skip("www-data GID is not a non-root identity")
+	}
+
+	root := t.TempDir()
+	poolDirectory := filepath.Join(root, "8.3", "fpm", "pool.d")
+	if err := os.MkdirAll(poolDirectory, 0755); err != nil {
+		t.Fatal(err)
+	}
+	poolPath := filepath.Join(poolDirectory, "www.conf")
+	if err := os.WriteFile(poolPath, []byte("[www]\nuser = www-data\ngroup = www-data\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	applicationPath := filepath.Join(root, "application")
+	if err := os.MkdirAll(applicationPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(applicationPath, "artisan"), []byte("<?php\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	request := ProvisionRequest{
+		Applications: []ProvisionApplication{
+			{
+				ApplicationKey: "application-one",
+				BasePath:       applicationPath,
+				RuntimeUID:     uid,
+				RuntimeGID:     gid,
+			},
+		},
+	}
+
+	if err := validateApplicationTargetsAt(request, root); err != nil {
+		t.Fatalf("valid application and PHP-FPM mapping was rejected: %v", err)
 	}
 }
 
