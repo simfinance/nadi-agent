@@ -40,7 +40,7 @@ func TestValidateActivationRequestAcceptsActiveGrantCapabilities(t *testing.T) {
 	request := Request{
 		ProtocolVersion:   1,
 		Operation:         "publish_activation_state",
-		ApplicationID:     "app-1",
+		ApplicationID:     "00000000-0000-4000-8000-000000000001",
 		ApplicationKey:    "stable-key",
 		ActivationState:   "active",
 		MonitoringEnabled: true,
@@ -60,7 +60,7 @@ func TestValidateActivationRequestRejectsBridgeCapabilityNames(t *testing.T) {
 	request := Request{
 		ProtocolVersion:   1,
 		Operation:         "publish_activation_state",
-		ApplicationID:     "app-1",
+		ApplicationID:     "00000000-0000-4000-8000-000000000001",
 		ApplicationKey:    "stable-key",
 		ActivationState:   "active",
 		MonitoringEnabled: true,
@@ -80,7 +80,7 @@ func TestValidateActivationRequestRejectsActiveWithoutAcknowledgement(t *testing
 	request := Request{
 		ProtocolVersion:   1,
 		Operation:         "publish_activation_state",
-		ApplicationID:     "app-1",
+		ApplicationID:     "00000000-0000-4000-8000-000000000001",
 		ApplicationKey:    "stable-key",
 		ActivationState:   "active",
 		MonitoringEnabled: true,
@@ -100,7 +100,7 @@ func TestValidateActivationRequestRejectsExpiredLease(t *testing.T) {
 	request := Request{
 		ProtocolVersion: 1,
 		Operation:       "publish_activation_state",
-		ApplicationID:   "app-1",
+		ApplicationID:   "00000000-0000-4000-8000-000000000001",
 		ApplicationKey:  "stable-key",
 		ActivationState: "unknown",
 		Capabilities:    []string{},
@@ -120,13 +120,13 @@ func TestValidateConfigRejectsCredentialPathOutsideApplication(t *testing.T) {
 		AgentGID:      1001,
 		Applications: []Mapping{
 			{
-				ApplicationID:       "app-1",
+				ApplicationID:       "00000000-0000-4000-8000-000000000001",
 				ApplicationKey:      "stable-key",
 				BasePath:            "/srv/www/app",
 				RuntimeUID:          33,
 				RuntimeGID:          33,
 				CredentialFile:      "/etc/nadi-agent/credential",
-				ActivationStateFile: "/run/nadi-agent/bridge-state/app-1.json",
+				ActivationStateFile: "/run/nadi-agent/bridge-state/00000000-0000-4000-8000-000000000001.json",
 			},
 		},
 	}
@@ -138,13 +138,13 @@ func TestValidateConfigRejectsCredentialPathOutsideApplication(t *testing.T) {
 
 func TestValidateConfigRejectsDuplicateApplicationMappings(t *testing.T) {
 	mapping := Mapping{
-		ApplicationID:       "app-1",
+		ApplicationID:       "00000000-0000-4000-8000-000000000001",
 		ApplicationKey:      "stable-key",
 		BasePath:            "/srv/www/app",
 		RuntimeUID:          33,
 		RuntimeGID:          33,
-		CredentialFile:      "/var/lib/nadi-bridge/app-1/credential",
-		ActivationStateFile: "/run/nadi-agent/bridge-state/app-1.json",
+		CredentialFile:      "/var/lib/nadi-bridge/00000000-0000-4000-8000-000000000001/credential",
+		ActivationStateFile: "/run/nadi-agent/bridge-state/00000000-0000-4000-8000-000000000001.json",
 	}
 
 	config := Config{
@@ -166,13 +166,13 @@ func TestValidateConfigAcceptsPerApplicationRuntimeMapping(t *testing.T) {
 		AgentGID:      1001,
 		Applications: []Mapping{
 			{
-				ApplicationID:       "app-1",
+				ApplicationID:       "00000000-0000-4000-8000-000000000001",
 				ApplicationKey:      "stable-key",
 				BasePath:            "/srv/www/app",
 				RuntimeUID:          33,
 				RuntimeGID:          33,
-				CredentialFile:      "/var/lib/nadi-bridge/app-1/credential",
-				ActivationStateFile: "/run/nadi-agent/bridge-state/app-1.json",
+				CredentialFile:      "/var/lib/nadi-bridge/00000000-0000-4000-8000-000000000001/credential",
+				ActivationStateFile: "/run/nadi-agent/bridge-state/00000000-0000-4000-8000-000000000001.json",
 			},
 		},
 	}
@@ -186,7 +186,7 @@ func TestResponseNeverIncludesRawCredential(t *testing.T) {
 	response := Response{
 		ProtocolVersion: 1,
 		Success:         false,
-		ApplicationID:   "app-1",
+		ApplicationID:   "00000000-0000-4000-8000-000000000001",
 		ErrorCode:       "credential_publish_failed",
 	}
 
@@ -210,7 +210,7 @@ func TestValidateMonotonicObservationRejectsOlderUpdate(t *testing.T) {
 }
 
 func TestDecodeRequestRejectsCredentialFieldsOnActivationOperation(t *testing.T) {
-	payload := []byte(`{"protocol_version":1,"operation":"publish_activation_state","application_id":"app-1","application_key":"stable-key","activation_state":"unknown","monitoring_enabled":false,"grant_acknowledged":false,"capabilities":[],"observed_at":"2026-11-23T10:00:00Z","valid_until":"2026-11-23T10:05:00Z","credential":"unexpected"}`)
+	payload := []byte(`{"protocol_version":1,"operation":"publish_activation_state","application_id":"00000000-0000-4000-8000-000000000001","application_key":"stable-key","activation_state":"unknown","monitoring_enabled":false,"grant_acknowledged":false,"capabilities":[],"observed_at":"2026-11-23T10:00:00Z","valid_until":"2026-11-23T10:05:00Z","credential":"unexpected"}`)
 
 	if _, err := decodeRequest(payload); err == nil {
 		t.Fatal("credential field must not be accepted on activation operation")
@@ -218,7 +218,7 @@ func TestDecodeRequestRejectsCredentialFieldsOnActivationOperation(t *testing.T)
 }
 
 func TestDecodeRequestRequiresExplicitCapabilitiesArray(t *testing.T) {
-	payload := []byte(`{"protocol_version":1,"operation":"publish_activation_state","application_id":"app-1","application_key":"stable-key","activation_state":"unknown","monitoring_enabled":false,"grant_acknowledged":false,"observed_at":"2026-11-23T10:00:00Z","valid_until":"2026-11-23T10:05:00Z"}`)
+	payload := []byte(`{"protocol_version":1,"operation":"publish_activation_state","application_id":"00000000-0000-4000-8000-000000000001","application_key":"stable-key","activation_state":"unknown","monitoring_enabled":false,"grant_acknowledged":false,"observed_at":"2026-11-23T10:00:00Z","valid_until":"2026-11-23T10:05:00Z"}`)
 
 	if _, err := decodeRequest(payload); err == nil {
 		t.Fatal("activation request must include the capabilities array")
@@ -239,13 +239,13 @@ func TestHandleConnectionRejectsUnexpectedPeerUID(t *testing.T) {
 		AgentGID:      uint32(os.Getgid() + 1),
 		Applications: []Mapping{
 			{
-				ApplicationID:       "app-1",
+				ApplicationID:       "00000000-0000-4000-8000-000000000001",
 				ApplicationKey:      "stable-key",
 				BasePath:            "/srv/www/app",
 				RuntimeUID:          33,
 				RuntimeGID:          33,
-				CredentialFile:      "/var/lib/nadi-bridge/app-1/credential",
-				ActivationStateFile: "/run/nadi-agent/bridge-state/app-1.json",
+				CredentialFile:      "/var/lib/nadi-bridge/00000000-0000-4000-8000-000000000001/credential",
+				ActivationStateFile: "/run/nadi-agent/bridge-state/00000000-0000-4000-8000-000000000001.json",
 			},
 		},
 	}
@@ -291,13 +291,13 @@ func TestValidateConfigRejectsCredentialPathInsideWritableApplicationTree(t *tes
 		AgentGID:      1001,
 		Applications: []Mapping{
 			{
-				ApplicationID:       "app-1",
+				ApplicationID:       "00000000-0000-4000-8000-000000000001",
 				ApplicationKey:      "stable-key",
 				BasePath:            "/srv/www/app",
 				RuntimeUID:          33,
 				RuntimeGID:          33,
 				CredentialFile:      "/srv/www/app/storage/app/private/nadi/credential",
-				ActivationStateFile: "/run/nadi-agent/bridge-state/app-1.json",
+				ActivationStateFile: "/run/nadi-agent/bridge-state/00000000-0000-4000-8000-000000000001.json",
 			},
 		},
 	}
@@ -314,13 +314,13 @@ func TestValidateConfigAcceptsRootOwnedExternalCredentialDirectory(t *testing.T)
 		AgentGID:      1001,
 		Applications: []Mapping{
 			{
-				ApplicationID:       "app-1",
+				ApplicationID:       "00000000-0000-4000-8000-000000000001",
 				ApplicationKey:      "stable-key",
 				BasePath:            "/srv/www/app",
 				RuntimeUID:          33,
 				RuntimeGID:          33,
-				CredentialFile:      "/var/lib/nadi-bridge/app-1/credential",
-				ActivationStateFile: "/run/nadi-agent/bridge-state/app-1.json",
+				CredentialFile:      "/var/lib/nadi-bridge/00000000-0000-4000-8000-000000000001/credential",
+				ActivationStateFile: "/run/nadi-agent/bridge-state/00000000-0000-4000-8000-000000000001.json",
 			},
 		},
 	}
@@ -328,4 +328,37 @@ func TestValidateConfigAcceptsRootOwnedExternalCredentialDirectory(t *testing.T)
 	if err := validateConfig(config); err != nil {
 		t.Fatalf("safe external credential path was rejected: %v", err)
 	}
+}
+
+
+func TestValidateConfigRejectsDuplicateRuntimeUIDs(t *testing.T) {
+    first := Mapping{
+        ApplicationID:       "00000000-0000-4000-8000-000000000001",
+        ApplicationKey:      "first-app",
+        BasePath:            "/srv/www/first",
+        RuntimeUID:          33,
+        RuntimeGID:          33,
+        CredentialFile:      "/var/lib/nadi-bridge/00000000-0000-4000-8000-000000000001/credential",
+        ActivationStateFile: "/run/nadi-agent/bridge-state/00000000-0000-4000-8000-000000000001.json",
+    }
+    second := Mapping{
+        ApplicationID:       "00000000-0000-4000-8000-000000000002",
+        ApplicationKey:      "second-app",
+        BasePath:            "/srv/www/second",
+        RuntimeUID:          33,
+        RuntimeGID:          33,
+        CredentialFile:      "/var/lib/nadi-bridge/00000000-0000-4000-8000-000000000002/credential",
+        ActivationStateFile: "/run/nadi-agent/bridge-state/00000000-0000-4000-8000-000000000002.json",
+    }
+
+    config := Config{
+        SchemaVersion: 1,
+        AgentUID:      1001,
+        AgentGID:      1001,
+        Applications:  []Mapping{first, second},
+    }
+
+    if err := validateConfig(config); err == nil {
+        t.Fatal("duplicate application runtime UID must be rejected")
+    }
 }
