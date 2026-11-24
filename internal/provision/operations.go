@@ -299,8 +299,8 @@ func runInstallAgentOperation(request ProvisionOperationRequest, response Helper
 	inventory := provisionInventory{
 		ProtocolVersion: 1,
 		AgentVersion:    releaseManifest.Version,
-		ArtifactSHA256: artifact.SHA256,
-		Applications:   request.Applications,
+		ArtifactSHA256:  artifact.SHA256,
+		Applications:    request.Applications,
 	}
 	inventoryJSON, err := json.Marshal(inventory)
 	if err != nil {
