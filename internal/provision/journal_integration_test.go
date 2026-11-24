@@ -2,9 +2,62 @@ package provision
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
+
+func TestProvisionLockCoordinatesSeparateProcessesAndReusesStaleLockFile(t *testing.T) {
+	const childMarker = "NADI_PROVISION_LOCK_CHILD"
+	if os.Getenv(childMarker) == "1" {
+		lockPath := os.Getenv("NADI_PROVISION_LOCK_PATH")
+		unlock, err := acquireProvisionLockAt(lockPath)
+		if err != nil {
+			os.Exit(3)
+		}
+		unlock()
+		os.Exit(0)
+	}
+
+	directory := t.TempDir()
+	path := filepath.Join(directory, "provision.lock")
+	unlock, err := acquireProvisionLockAt(path)
+	if err != nil {
+		t.Fatalf("acquire parent provisioning lock: %v", err)
+	}
+
+	runChild := func() error {
+		command := exec.Command(
+			os.Args[0],
+			"-test.run=^TestProvisionLockCoordinatesSeparateProcessesAndReusesStaleLockFile$",
+		)
+		command.Env = append(
+			os.Environ(),
+			childMarker+"=1",
+			"NADI_PROVISION_LOCK_PATH="+path,
+		)
+		return command.Run()
+	}
+
+	if err := runChild(); err == nil {
+		unlock()
+		t.Fatal("separate process acquired a lock while the parent process held it")
+	}
+
+	unlock()
+
+	if err := runChild(); err != nil {
+		t.Fatalf("separate process could not acquire the persistent lock file after release: %v", err)
+	}
+
+	metadata, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("persistent lock file should remain available for future flock operations: %v", err)
+	}
+	if metadata.Mode()&os.ModeSymlink != 0 || !metadata.Mode().IsRegular() {
+		t.Fatal("persistent provisioning lock path must remain a regular non-symlink file")
+	}
+}
 
 func TestProvisionJournalRetainsFixedServiceAccount(t *testing.T) {
 	directory := t.TempDir()
