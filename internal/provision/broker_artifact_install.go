@@ -188,18 +188,18 @@ func ensureDirectoryTree(
 
 		current = filepath.Join(current, segment)
 		isDestination := current == directory
-		directoryMode := os.FileMode(0)
+		createMode := systemDirectoryMode
+		validationMode := os.FileMode(0)
 		if isDestination {
-			directoryMode = mode
-		} else {
-			directoryMode = systemDirectoryMode
+			createMode = mode
+			validationMode = mode
 		}
 
-		if err := os.Mkdir(current, directoryMode); err != nil && !errors.Is(err, os.ErrExist) {
+		if err := os.Mkdir(current, createMode); err != nil && !errors.Is(err, os.ErrExist) {
 			return fmt.Errorf("create directory %s: %w", current, err)
 		}
 
-		if err := ensureOwnedDirectory(current, directoryMode, ownerUID, ownerGID); err != nil {
+		if err := ensureOwnedDirectory(current, validationMode, ownerUID, ownerGID); err != nil {
 			return fmt.Errorf("validate directory %s: %w", current, err)
 		}
 	}
