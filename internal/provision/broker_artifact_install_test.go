@@ -66,7 +66,24 @@ func TestInstallBrokerArtifactsWritesOnlyValidatedDestinations(t *testing.T) {
 		t.Fatal("installed systemd drop-in does not preserve the exact application write scope")
 	}
 
-	credentialDirectory := filepath.Join(root, "var", "lib", "nadi-bridge", "00000000-0000-4000-8000-000000000001")
+	bridgeRoot := filepath.Join(root, "var", "lib", "nadi-bridge")
+	bridgeRootInfo, err := os.Stat(bridgeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bridgeRootInfo.Mode().Perm() != 0711 {
+		t.Fatalf("expected Bridge root mode 0711, got %04o", bridgeRootInfo.Mode().Perm())
+	}
+
+	varLibInfo, err := os.Stat(filepath.Join(root, "var", "lib"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if varLibInfo.Mode().Perm() != 0755 {
+		t.Fatalf("expected system /var/lib mode 0755, got %04o", varLibInfo.Mode().Perm())
+	}
+
+	credentialDirectory := filepath.Join(bridgeRoot, "00000000-0000-4000-8000-000000000001")
 	directoryInfo, err := os.Stat(credentialDirectory)
 	if err != nil {
 		t.Fatal(err)
