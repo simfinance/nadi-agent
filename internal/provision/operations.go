@@ -362,7 +362,6 @@ func runInstallAgentOperation(request ProvisionOperationRequest, response Helper
 	return 0
 }
 
-
 func decodeEnrollmentIdentitySummary(summaryJSON []byte) (provisionCompletion, error) {
 	if len(summaryJSON) == 0 || len(summaryJSON) > maximumEnrollmentSummaryBytes {
 		return provisionCompletion{}, errors.New("Agent enrollment identity summary is empty or too large")

@@ -137,9 +137,8 @@ func TestDecodeProvisionOperationRejectsDuplicateJSONKeys(t *testing.T) {
 	}
 }
 
-
 func TestDecodeEnrollmentIdentitySummaryReturnsStableIdentity(t *testing.T) {
-    summary := []byte(`{
+	summary := []byte(`{
         "protocol_version": 1,
         "enrollment_status": "registered",
         "agent_instance_id": "agent-instance-restore",
@@ -156,20 +155,20 @@ func TestDecodeEnrollmentIdentitySummaryReturnsStableIdentity(t *testing.T) {
         ]
     }`)
 
-    identity, err := decodeEnrollmentIdentitySummary(summary)
-    if err != nil {
-        t.Fatalf("valid enrollment identity summary was rejected: %v", err)
-    }
+	identity, err := decodeEnrollmentIdentitySummary(summary)
+	if err != nil {
+		t.Fatalf("valid enrollment identity summary was rejected: %v", err)
+	}
 
-    if identity.AgentInstanceID != "agent-instance-restore" ||
-        identity.AgentID != "central-agent-restore" ||
-        identity.ServerID != "central-server-restore" {
-        t.Fatalf("unexpected identity summary: %#v", identity)
-    }
+	if identity.AgentInstanceID != "agent-instance-restore" ||
+		identity.AgentID != "central-agent-restore" ||
+		identity.ServerID != "central-server-restore" {
+		t.Fatalf("unexpected identity summary: %#v", identity)
+	}
 }
 
 func TestDecodeEnrollmentIdentitySummaryRejectsIncompleteIdentity(t *testing.T) {
-    summary := []byte(`{
+	summary := []byte(`{
         "protocol_version": 1,
         "enrollment_status": "registered",
         "agent_instance_id": "agent-instance-restore",
@@ -181,7 +180,7 @@ func TestDecodeEnrollmentIdentitySummaryRejectsIncompleteIdentity(t *testing.T) 
         ]
     }`)
 
-    if _, err := decodeEnrollmentIdentitySummary(summary); err == nil {
-        t.Fatal("incomplete Central identity must be rejected")
-    }
+	if _, err := decodeEnrollmentIdentitySummary(summary); err == nil {
+		t.Fatal("incomplete Central identity must be rejected")
+	}
 }
