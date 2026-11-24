@@ -205,6 +205,15 @@ func RunPrivileged(reader io.Reader, writer io.Writer, errorWriter io.Writer) in
 		return writeOperationFailure(writer, errorWriter, response, err)
 	}
 
+	unlock, err := acquireProvisionLock()
+	if err != nil {
+		response.Phase = "operation_lock"
+		response.EnrollmentStatus = "unknown"
+		response.RetrySafe = false
+		return writeOperationFailure(writer, errorWriter, response, err)
+	}
+	defer unlock()
+
 	switch request.Operation {
 	case "install_agent":
 		return runInstallAgentOperation(request, response, writer, errorWriter)
