@@ -62,101 +62,100 @@ func TestProvisionJournalRollbackDoesNotDeleteRetainedAccount(t *testing.T) {
 	}
 }
 
-
 func TestEnsureDirectoryTreeJournaledTracksAndRollsBackCreatedDirectory(t *testing.T) {
-    root := t.TempDir()
-    journalPath := filepath.Join(root, "journal.json")
-    target := filepath.Join(root, "managed", "nested")
+	root := t.TempDir()
+	journalPath := filepath.Join(root, "journal.json")
+	target := filepath.Join(root, "managed", "nested")
 
-    store, journal, err := newProvisionJournal(journalPath)
-    if err != nil {
-        t.Fatal(err)
-    }
+	store, journal, err := newProvisionJournal(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-    if err := ensureDirectoryTreeJournaled(
-        root,
-        target,
-        0700,
-        os.Geteuid(),
-        os.Getegid(),
-        store,
-        &journal,
-    ); err != nil {
-        t.Fatalf("create journaled directory tree: %v", err)
-    }
-    if len(journal.Actions) != 2 {
-        t.Fatalf("expected both new directories to be journaled, got %d", len(journal.Actions))
-    }
+	if err := ensureDirectoryTreeJournaled(
+		root,
+		target,
+		0700,
+		os.Geteuid(),
+		os.Getegid(),
+		store,
+		&journal,
+	); err != nil {
+		t.Fatalf("create journaled directory tree: %v", err)
+	}
+	if len(journal.Actions) != 2 {
+		t.Fatalf("expected both new directories to be journaled, got %d", len(journal.Actions))
+	}
 
-    if err := store.Rollback(&journal, []string{root}); err != nil {
-        t.Fatalf("rollback journaled directory tree: %v", err)
-    }
-    if _, err := os.Lstat(filepath.Join(root, "managed")); !os.IsNotExist(err) {
-        t.Fatalf("created parent directory remains after rollback: %v", err)
-    }
+	if err := store.Rollback(&journal, []string{root}); err != nil {
+		t.Fatalf("rollback journaled directory tree: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "managed")); !os.IsNotExist(err) {
+		t.Fatalf("created parent directory remains after rollback: %v", err)
+	}
 }
 
 func TestEnsureDirectoryTreeJournaledDoesNotChangeExistingMode(t *testing.T) {
-    root := t.TempDir()
-    target := filepath.Join(root, "existing")
-    if err := os.Mkdir(target, 0755); err != nil {
-        t.Fatal(err)
-    }
+	root := t.TempDir()
+	target := filepath.Join(root, "existing")
+	if err := os.Mkdir(target, 0755); err != nil {
+		t.Fatal(err)
+	}
 
-    store, journal, err := newProvisionJournal(filepath.Join(root, "journal.json"))
-    if err != nil {
-        t.Fatal(err)
-    }
+	store, journal, err := newProvisionJournal(filepath.Join(root, "journal.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
 
-    err = ensureDirectoryTreeJournaled(
-        root,
-        target,
-        0700,
-        os.Geteuid(),
-        os.Getegid(),
-        store,
-        &journal,
-    )
-    if err == nil {
-        t.Fatal("existing directory with a different mode must be rejected")
-    }
+	err = ensureDirectoryTreeJournaled(
+		root,
+		target,
+		0700,
+		os.Geteuid(),
+		os.Getegid(),
+		store,
+		&journal,
+	)
+	if err == nil {
+		t.Fatal("existing directory with a different mode must be rejected")
+	}
 
-    metadata, statErr := os.Stat(target)
-    if statErr != nil {
-        t.Fatal(statErr)
-    }
-    if metadata.Mode().Perm() != 0755 {
-        t.Fatalf("existing directory mode was changed: %o", metadata.Mode().Perm())
-    }
+	metadata, statErr := os.Stat(target)
+	if statErr != nil {
+		t.Fatal(statErr)
+	}
+	if metadata.Mode().Perm() != 0755 {
+		t.Fatalf("existing directory mode was changed: %o", metadata.Mode().Perm())
+	}
 }
 
 func TestInstallImmutableFileJournaledRollsBackCreatedFile(t *testing.T) {
-    root := t.TempDir()
-    target := filepath.Join(root, "asset")
-    store, journal, err := newProvisionJournal(filepath.Join(root, "journal.json"))
-    if err != nil {
-        t.Fatal(err)
-    }
+	root := t.TempDir()
+	target := filepath.Join(root, "asset")
+	store, journal, err := newProvisionJournal(filepath.Join(root, "journal.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
 
-    if err := installImmutableFileJournaled(
-        target,
-        []byte("trusted asset"),
-        0600,
-        os.Geteuid(),
-        os.Getegid(),
-        store,
-        &journal,
-    ); err != nil {
-        t.Fatalf("install journaled file: %v", err)
-    }
-    if len(journal.Actions) != 1 || journal.Actions[0].State != "applied" {
-        t.Fatalf("file creation was not recorded: %#v", journal.Actions)
-    }
+	if err := installImmutableFileJournaled(
+		target,
+		[]byte("trusted asset"),
+		0600,
+		os.Geteuid(),
+		os.Getegid(),
+		store,
+		&journal,
+	); err != nil {
+		t.Fatalf("install journaled file: %v", err)
+	}
+	if len(journal.Actions) != 1 || journal.Actions[0].State != "applied" {
+		t.Fatalf("file creation was not recorded: %#v", journal.Actions)
+	}
 
-    if err := store.Rollback(&journal, []string{root}); err != nil {
-        t.Fatalf("rollback journaled file: %v", err)
-    }
-    if _, err := os.Lstat(target); !os.IsNotExist(err) {
-        t.Fatalf("created file remains after rollback: %v", err)
-    }
+	if err := store.Rollback(&journal, []string{root}); err != nil {
+		t.Fatalf("rollback journaled file: %v", err)
+	}
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Fatalf("created file remains after rollback: %v", err)
+	}
 }
