@@ -14,10 +14,10 @@ import (
 )
 
 const (
-	brokerMappingFileMode = 0600
-	brokerDropInFileMode  = 0644
-	bridgeDirectoryMode   = 0711
-	systemDirectoryMode   = 0755
+	brokerMappingFileMode os.FileMode = 0600
+	brokerDropInFileMode  os.FileMode = 0644
+	bridgeDirectoryMode   os.FileMode = 0711
+	systemDirectoryMode   os.FileMode = 0755
 )
 
 // InstallBrokerArtifacts installs only the fixed broker mapping, per-application
