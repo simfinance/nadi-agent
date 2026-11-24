@@ -26,6 +26,13 @@ func TestVerifyReadOnlyPreservesExistingEnrollmentIdentity(t *testing.T) {
 		CentralServerID:    "central-server",
 		EnrollmentStatus:   "registered",
 		CreatedAt:          time.Now().UTC(),
+		Applications: []state.EnrolledApplication{
+			{
+				ApplicationID:  "application-restore",
+				ApplicationKey: "application-key-restore",
+				RegistrationID: "registration-restore",
+			},
+		},
 	}
 	if err := store.Save(expected); err != nil {
 		t.Fatal(err)
