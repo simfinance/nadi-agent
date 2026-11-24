@@ -67,7 +67,9 @@ Allowed effects:
 - Preserve Agent state and report a non-retryable partial outcome if Central registration succeeded but broker configuration failed.
 
 Expected result:
+- Success uses `phase=enrolled`, `enrollment_status=registered`, and `retry_safe=false`.
 - A bounded success or partial-outcome envelope.
+- A root-owned, non-secret enrollment-attempt marker is persisted before invoking Agent. If no verified completion record exists on a later invocation, the operation fails closed with `enrollment_status=unknown` and `retry_safe=false`.
 - `retry_safe=false` whenever enrollment was submitted and the outcome is unknown or registered.
 - A retry may be marked safe only when the Agent proves that no enrollment request was submitted, or proves that it will replay the exact persisted request.
 
@@ -83,6 +85,7 @@ Allowed effects:
 - Do not start monitoring directly; the Agent Runtime Activation Gate remains authoritative.
 
 Expected result:
+- Success uses `phase=completed`, `enrollment_status=registered`, and `retry_safe=false`.
 - Success only after both fixed services pass startup verification.
 - A partial outcome must identify the phase without secrets and must never instruct an automatic enrollment retry.
 
