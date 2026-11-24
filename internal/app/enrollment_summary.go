@@ -42,14 +42,7 @@ type EnrollmentApplicationSummary struct {
 }
 
 func (a *App) WriteVerifiedEnrollmentSummary(writer io.Writer) error {
-    store, err := state.Open(a.config.StateDir);
-    if err != nil
-    {
-        return fmt.Errorf("open Agent state for identity verification: %w", err);
-    }
-    defer store.Close();
-
-    current, err := identity.Verify(store);
+    current, err := identity.VerifyReadOnly(a.config.StateDir);
     if err != nil
     {
         return fmt.Errorf("verify existing Agent identity: %w", err);
