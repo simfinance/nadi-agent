@@ -6,13 +6,13 @@ Status: implementation foundation; not production-installed or deployment-approv
 
 The broker runs in a dedicated mode of the signed NADI Agent release binary through a separate root-owned systemd service. It is not started by Composer and is not run as part of the Laravel PHP process. The helper installs the same verified binary at the fixed Agent path; systemd invokes its `--handoff-broker` mode. It accepts only local Unix-domain socket connections at:
 
-`/run/nadi-agent/credential-handoff.sock`
+`/run/nadi/credential-handoff.sock`
 
 The broker authenticates the connecting process using Linux `SO_PEERCRED` and compares the kernel-reported UID with the root-owned mapping configuration's `agent_uid`. It never trusts a UID supplied in JSON.
 
 ## Mapping configuration
 
-The root-owned file `/etc/nadi-agent/bridge-mappings.json` uses schema version 1:
+The root-owned file `/etc/nadi/bridge-mappings.json` uses schema version 1:
 
 ```json
 {
@@ -27,7 +27,7 @@ The root-owned file `/etc/nadi-agent/bridge-mappings.json` uses schema version 1
             "runtime_uid": 33,
             "runtime_gid": 33,
             "credential_file": "/var/lib/nadi-bridge/00000000-0000-4000-8000-000000000001/credential",
-            "activation_state_file": "/run/nadi-agent/bridge-state/00000000-0000-4000-8000-000000000001.json"
+            "activation_state_file": "/run/nadi/bridge-state/00000000-0000-4000-8000-000000000001.json"
         }
     ]
 }
@@ -46,7 +46,7 @@ The broker preserves Central grant capability names. Bridge endpoint mapping is 
 
 ## Runtime directories and permissions
 
-- Socket directory: `/run/nadi-agent`, owner `root:root`, mode `0711`. Execute-only access lets the PHP runtime traverse to its assertion file without granting socket access.
+- Socket directory: `/run/nadi`, owner `root:root`, mode `0711`. Execute-only access lets the PHP runtime traverse to its assertion file without granting socket access.
 - Socket: owner `root:nadi-agent`, mode `0660`.
 - Activation state directory: `/run/nadi-agent/bridge-state`, owner `root:root`, mode `0711`.
 - Activation assertion: owner `root:<Laravel runtime group>`, mode `0640`.
