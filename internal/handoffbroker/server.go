@@ -143,7 +143,7 @@ func LoadConfig(path string) (Config, error) {
 }
 
 func NewServer(socketPath string, config Config) (*Server, error) {
-	if socketPath != "/run/nadi-agent/credential-handoff.sock" {
+	if socketPath != "/run/nadi/credential-handoff.sock" {
 		return nil, errors.New("broker socket path must use the fixed NADI handoff location")
 	}
 
@@ -917,7 +917,7 @@ func validateConfig(config Config) error {
 		}
 
 		expectedActivationPath := filepath.Join(
-			"/run/nadi-agent/bridge-state",
+			"/run/nadi/bridge-state",
 			mapping.ApplicationID+".json",
 		)
 		if activationPath != expectedActivationPath {
