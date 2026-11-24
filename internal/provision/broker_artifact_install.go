@@ -76,15 +76,19 @@ func installBrokerArtifactsAt(
 		return fmt.Errorf("validate artifact installation root: %w", err)
 	}
 
-	for _, application := range config.Applications {
-		credentialDirectory := filepath.Join(
-			root,
-			"var",
-			"lib",
-			"nadi-bridge",
-			application.ApplicationID,
-		)
+	bridgeRoot := filepath.Join(root, "var", "lib", "nadi-bridge")
+	if err := ensureDirectoryTree(
+		root,
+		bridgeRoot,
+		bridgeDirectoryMode,
+		ownerUID,
+		ownerGID,
+	); err != nil {
+		return fmt.Errorf("prepare Bridge credential root: %w", err)
+	}
 
+	for _, application := range config.Applications {
+		credentialDirectory := filepath.Join(bridgeRoot, application.ApplicationID)
 		if err := ensureDirectoryTree(
 			root,
 			credentialDirectory,
@@ -183,11 +187,19 @@ func ensureDirectoryTree(
 		}
 
 		current = filepath.Join(current, segment)
-		if err := os.Mkdir(current, mode); err != nil && !errors.Is(err, os.ErrExist) {
+		isDestination := current == directory
+		directoryMode := os.FileMode(0)
+		if isDestination {
+			directoryMode = mode
+		} else {
+			directoryMode = systemDirectoryMode
+		}
+
+		if err := os.Mkdir(current, directoryMode); err != nil && !errors.Is(err, os.ErrExist) {
 			return fmt.Errorf("create directory %s: %w", current, err)
 		}
 
-		if err := ensureOwnedDirectory(current, mode, ownerUID, ownerGID); err != nil {
+		if err := ensureOwnedDirectory(current, directoryMode, ownerUID, ownerGID); err != nil {
 			return fmt.Errorf("validate directory %s: %w", current, err)
 		}
 	}
@@ -219,7 +231,7 @@ func ensureOwnedDirectory(
 		return errors.New("directory must not be group- or other-writable")
 	}
 
-	if metadata.Mode().Perm() != mode {
+	if mode != 0 && metadata.Mode().Perm() != mode {
 		if err := os.Chmod(path, mode); err != nil {
 			return fmt.Errorf("set directory permissions: %w", err)
 		}
