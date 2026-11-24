@@ -46,7 +46,7 @@ func TestInstallBrokerArtifactsWritesOnlyValidatedDestinations(t *testing.T) {
 		t.Fatalf("valid broker artifacts were rejected: %v", err)
 	}
 
-	mappingPath := filepath.Join(root, "etc", "nadi-agent", "bridge-mappings.json")
+	mappingPath := filepath.Join(root, "etc", "nadi", "bridge-mappings.json")
 	mappingInfo, err := os.Stat(mappingPath)
 	if err != nil {
 		t.Fatal(err)
