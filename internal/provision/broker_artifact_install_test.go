@@ -27,7 +27,7 @@ func TestInstallBrokerArtifactsWritesOnlyValidatedDestinations(t *testing.T) {
 				RuntimeUID:          1001,
 				RuntimeGID:          1001,
 				CredentialFile:      "/var/lib/nadi-bridge/00000000-0000-4000-8000-000000000001/credential",
-				ActivationStateFile: "/run/nadi-agent/bridge-state/00000000-0000-4000-8000-000000000001.json",
+				ActivationStateFile: "/run/nadi/bridge-state/00000000-0000-4000-8000-000000000001.json",
 			},
 		},
 	}
@@ -113,7 +113,7 @@ func TestInstallBrokerArtifactsRejectsMismatchedDropIn(t *testing.T) {
 				RuntimeUID:          1001,
 				RuntimeGID:          1001,
 				CredentialFile:      "/var/lib/nadi-bridge/00000000-0000-4000-8000-000000000001/credential",
-				ActivationStateFile: "/run/nadi-agent/bridge-state/00000000-0000-4000-8000/000000000001.json",
+				ActivationStateFile: "/run/nadi/bridge-state/00000000-0000-4000-8000/000000000001.json",
 			},
 		},
 	}
