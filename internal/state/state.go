@@ -1,6 +1,7 @@
 package state
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
