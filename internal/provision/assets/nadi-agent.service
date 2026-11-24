@@ -29,7 +29,7 @@ ProtectControlGroups=true
 LockPersonality=true
 RestrictSUIDSGID=true
 ReadOnlyPaths=/etc/nadi-agent/keys
-ReadWritePaths=/var/lib/nadi-agent /run/nadi-agent
+ReadWritePaths=/var/lib/nadi-agent
 
 [Install]
 WantedBy=multi-user.target
