@@ -2,6 +2,7 @@ package provision
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -12,11 +13,13 @@ import (
 	"net/url"
 	"os"
 	"os/user"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 const (
@@ -279,10 +282,29 @@ func runInstallAgentOperation(request ProvisionOperationRequest, response Helper
 		response.RetrySafe = false
 		return writeOperationFailure(writer, errorWriter, response, errors.New("an enrollment attempt exists without a matching verified completion record; reconcile before retrying"))
 	}
-	if err := rejectExistingAgentState(); err != nil {
-		response.Phase = "existing_installation"
+	if _, stateErr := os.Lstat(agentStateFile); stateErr == nil {
+		response.Phase = "identity_restore"
+		response.EnrollmentStatus = "unknown"
 		response.RetrySafe = false
-		return writeOperationFailure(writer, errorWriter, response, err)
+
+		if err := restoreExistingAgentIdentity(request, releaseManifest.Version, artifact.SHA256); err != nil {
+			response.Phase = "recovery_required"
+			return writeOperationFailure(writer, errorWriter, response, fmt.Errorf("existing Agent identity could not be safely restored: %w", err))
+		}
+
+		response.Success = true
+		response.Phase = "enrolled"
+		response.EnrollmentStatus = "registered"
+		response.RetrySafe = false
+		response.AgentVersion = releaseManifest.Version
+		response.Message = "Existing NADI Agent identity was verified on this server and restored without a new enrollment."
+		writeHelperResponse(writer, response)
+		return 0
+	} else if !errors.Is(stateErr, os.ErrNotExist) {
+		response.Phase = "recovery_required"
+		response.EnrollmentStatus = "unknown"
+		response.RetrySafe = false
+		return writeOperationFailure(writer, errorWriter, response, errors.New("existing Agent state cannot be safely inspected"))
 	}
 
 	response.Phase = "os_provisioning"
@@ -322,6 +344,161 @@ func runInstallAgentOperation(request ProvisionOperationRequest, response Helper
 	response.Message = "NADI Agent assets and validated application inventory installed; enrollment has not started."
 	writeHelperResponse(writer, response)
 	return 0
+}
+
+
+func restoreExistingAgentIdentity(
+	request ProvisionOperationRequest,
+	releaseVersion string,
+	artifactSHA256 string,
+) error {
+	identity, err := ensureAgentAccount()
+	if err != nil {
+		return fmt.Errorf("verify dedicated Agent runtime account: %w", err)
+	}
+
+	if err := verifyAgentStateFile(); err != nil {
+		return err
+	}
+
+	if err := installAgentAssets(request.Release.ArtifactPath, artifactSHA256); err != nil {
+		return fmt.Errorf("restore signed Agent assets without replacing existing files: %w", err)
+	}
+
+	if err := verifyInstalledAgentBinaryDigest(artifactSHA256); err != nil {
+		return err
+	}
+
+	summaryJSON, err := runAgentIdentityVerification(identity)
+	if err != nil {
+		return err
+	}
+
+	legacyRequest := ProvisionRequest{
+		Applications: request.Applications,
+	}
+	brokerConfig, mappingJSON, dropIn, err := BuildBrokerArtifacts(
+		uint32(identity.uid),
+		uint32(identity.gid),
+		legacyRequest,
+		summaryJSON,
+	)
+	if err != nil {
+		return fmt.Errorf("reconcile persisted Agent identity with the requested application inventory: %w", err)
+	}
+
+	if err := InstallBrokerArtifacts(brokerConfig, mappingJSON, dropIn); err != nil {
+		return fmt.Errorf("restore Bridge broker artifacts: %w", err)
+	}
+
+	inventory := provisionInventory{
+		ProtocolVersion: 1,
+		AgentVersion:    releaseVersion,
+		ArtifactSHA256:  artifactSHA256,
+		Applications:    request.Applications,
+	}
+	inventoryJSON, err := json.Marshal(inventory)
+	if err != nil {
+		return errors.New("encode restored provisioning inventory")
+	}
+	if err := installImmutableFile(provisionInventoryPath, inventoryJSON, 0600, 0, 0); err != nil {
+		return fmt.Errorf("persist restored provisioning inventory: %w", err)
+	}
+
+	completion := provisionCompletion{
+		ProtocolVersion:  1,
+		AgentVersion:     releaseVersion,
+		ApplicationCount: len(request.Applications),
+		EnrollmentStatus: "registered",
+	}
+	completionJSON, err := json.Marshal(completion)
+	if err != nil {
+		return errors.New("encode restored provisioning completion record")
+	}
+	if err := installImmutableFile(provisionCompletePath, completionJSON, 0600, 0, 0); err != nil {
+		return fmt.Errorf("persist restored provisioning completion record: %w", err)
+	}
+
+	if _, err := runTrustedCommand("/usr/bin/systemctl", "daemon-reload"); err != nil {
+		return fmt.Errorf("reload systemd units after identity restore: %w", err)
+	}
+
+	return nil
+}
+
+func verifyInstalledAgentBinaryDigest(expectedSHA256 string) error {
+	content, err := readRootOwnedRegularFile(agentBinaryPath, maximumArtifactBytes)
+	if err != nil {
+		return errors.New("existing Agent binary is missing or unsafe; identity restore requires a verified installed binary")
+	}
+
+	metadata, err := os.Lstat(agentBinaryPath)
+	if err != nil {
+		return err
+	}
+	stat, ok := metadata.Sys().(*syscall.Stat_t)
+	if !ok || stat.Uid != 0 || stat.Gid != 0 || metadata.Mode().Perm() != 0755 {
+		return errors.New("existing Agent binary ownership or permissions are invalid")
+	}
+
+	digest := sha256.Sum256(content)
+	if hex.EncodeToString(digest[:]) != expectedSHA256 {
+		return errors.New("existing Agent binary does not match the verified release; automatic binary replacement is prohibited")
+	}
+
+	return nil
+}
+
+func runAgentIdentityVerification(identity helperRuntimeIdentity) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	command := exec.CommandContext(
+		ctx,
+		agentBinaryPath,
+		"--verify-existing-identity-summary-stdout",
+	)
+	command.Env = []string{
+		"PATH=/usr/sbin:/usr/bin:/sbin:/bin",
+		"HOME=" + agentStateDirectory,
+		"NADI_CENTRAL_URL=https://nadi.pesantrenalirsyad.org",
+		"NADI_STATE_DIR=" + agentStateDirectory,
+		"NADI_ACTIVATION_PUBLIC_KEY=" + activationPublicKeyPath,
+		"NADI_ACTIVATION_KEY_ID=nadi-central-2026-01",
+		"NADI_AGENT_HANDOFF_SOCKET=/run/nadi/credential-handoff.sock",
+	}
+	command.SysProcAttr = &syscall.SysProcAttr{
+		Credential: &syscall.Credential{
+			Uid:    uint32(identity.uid),
+			Gid:    uint32(identity.gid),
+			Groups: []uint32{uint32(identity.gid)},
+		},
+		Setpgid: true,
+	}
+
+	var stdout boundedBuffer
+	var stderr boundedBuffer
+	stdout.maximum = maximumEnrollmentSummaryBytes
+	stderr.maximum = 4 * 1024
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+
+	if err := command.Run(); err != nil {
+		if ctx.Err() != nil {
+			return nil, errors.New("read-only Agent identity verification timed out")
+		}
+		return nil, errors.New("read-only Agent identity verification failed")
+	}
+	if stdout.overflow {
+		return nil, errors.New("verified Agent identity summary exceeded the allowed size")
+	}
+
+	summary := append([]byte(nil), stdout.buffer.Bytes()...)
+	if len(summary) == 0 {
+		return nil, errors.New("verified Agent identity summary is empty")
+	}
+
+	return summary, nil
 }
 
 func runEnrollAgentOperation(request ProvisionOperationRequest, response HelperResponse, writer io.Writer, errorWriter io.Writer) int {
