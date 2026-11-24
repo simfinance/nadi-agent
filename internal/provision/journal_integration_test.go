@@ -92,6 +92,39 @@ func TestProvisionLockIsReleasedAfterAbruptProcessExit(t *testing.T) {
 	unlock()
 }
 
+func TestProvisionLockRejectsSymlinkLockFile(t *testing.T) {
+	directory := t.TempDir()
+	target := filepath.Join(directory, "target")
+	path := filepath.Join(directory, "provision.lock")
+
+	if err := os.WriteFile(target, []byte("not a lock"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, path); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := acquireProvisionLockAt(path); err == nil {
+		t.Fatal("provisioning lock must reject a symlink path")
+	}
+}
+
+func TestProvisionLockRejectsUnsafeExistingPermissions(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "provision.lock")
+
+	if err := os.WriteFile(path, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0640); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := acquireProvisionLockAt(path); err == nil {
+		t.Fatal("provisioning lock must reject an existing file with unsafe permissions")
+	}
+}
+
 func TestProvisionJournalRetainsFixedServiceAccount(t *testing.T) {
 	directory := t.TempDir()
 	store, journal, err := newProvisionJournal(filepath.Join(directory, "journal.json"))
