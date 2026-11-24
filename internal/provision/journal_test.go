@@ -160,3 +160,14 @@ func TestProvisionJournalRejectsSymlinkResource(t *testing.T) {
 		t.Fatal("symlink resources must not be fingerprinted")
 	}
 }
+
+
+func TestProvisionJournalRollbackAllowlistAcceptsExactManagedRoot(t *testing.T) {
+    root := "/opt/nadi"
+    if !provisionJournalTargetAllowed(root, []string{root}) {
+        t.Fatal("rollback allowlist must accept the exact managed root directory")
+    }
+    if provisionJournalTargetAllowed("/opt", []string{root}) {
+        t.Fatal("rollback allowlist must reject a parent outside the managed root")
+    }
+}
