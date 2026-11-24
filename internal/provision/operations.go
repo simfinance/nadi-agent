@@ -49,6 +49,9 @@ type provisionCompletion struct {
 	AgentVersion     string `json:"agent_version"`
 	ApplicationCount int    `json:"application_count"`
 	EnrollmentStatus string `json:"enrollment_status"`
+	AgentInstanceID  string `json:"agent_instance_id"`
+	AgentID          string `json:"agent_id"`
+	ServerID         string `json:"server_id"`
 }
 
 type provisionEnrollmentAttempt struct {
@@ -266,7 +269,7 @@ func runInstallAgentOperation(request ProvisionOperationRequest, response Helper
 			sameApplicationInventory(inventory.Applications, request.Applications) &&
 			completion.AgentVersion == inventory.AgentVersion &&
 			completion.ApplicationCount == len(inventory.Applications) {
-			if err := verifyExistingEnrollmentIdentity(request.Applications, inventory.ArtifactSHA256); err == nil {
+			if err := verifyExistingEnrollmentIdentity(request.Applications, inventory.ArtifactSHA256, completion); err == nil {
 				response.Success = true
 				response.Phase = "enrolled"
 				response.EnrollmentStatus = "registered"
@@ -359,9 +362,43 @@ func runInstallAgentOperation(request ProvisionOperationRequest, response Helper
 	return 0
 }
 
+
+func decodeEnrollmentIdentitySummary(summaryJSON []byte) (provisionCompletion, error) {
+	if len(summaryJSON) == 0 || len(summaryJSON) > maximumEnrollmentSummaryBytes {
+		return provisionCompletion{}, errors.New("Agent enrollment identity summary is empty or too large")
+	}
+	if err := rejectDuplicateJSONKeys(summaryJSON); err != nil {
+		return provisionCompletion{}, errors.New("Agent enrollment identity summary is ambiguous")
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(summaryJSON))
+	decoder.DisallowUnknownFields()
+	var summary enrollmentSummary
+	if err := decoder.Decode(&summary); err != nil || ensureJSONEOF(decoder) != nil {
+		return provisionCompletion{}, errors.New("Agent enrollment identity summary is invalid")
+	}
+	if summary.ProtocolVersion != 1 ||
+		summary.EnrollmentStatus != "registered" ||
+		strings.TrimSpace(summary.AgentInstanceID) == "" ||
+		strings.TrimSpace(summary.AgentID) == "" ||
+		strings.TrimSpace(summary.ServerID) == "" ||
+		len(summary.Applications) < 1 ||
+		len(summary.Applications) > 20 {
+		return provisionCompletion{}, errors.New("Agent enrollment identity summary is incomplete")
+	}
+
+	return provisionCompletion{
+		EnrollmentStatus: "registered",
+		AgentInstanceID:  summary.AgentInstanceID,
+		AgentID:          summary.AgentID,
+		ServerID:         summary.ServerID,
+	}, nil
+}
+
 func verifyExistingEnrollmentIdentity(
 	applications []ProvisionApplication,
 	artifactSHA256 string,
+	completion provisionCompletion,
 ) error {
 	identity, err := ensureAgentAccount()
 	if err != nil {
@@ -377,6 +414,15 @@ func verifyExistingEnrollmentIdentity(
 	summaryJSON, err := runAgentIdentityVerification(identity)
 	if err != nil {
 		return err
+	}
+	identityRecord, err := decodeEnrollmentIdentitySummary(summaryJSON)
+	if err != nil {
+		return err
+	}
+	if identityRecord.AgentInstanceID != completion.AgentInstanceID ||
+		identityRecord.AgentID != completion.AgentID ||
+		identityRecord.ServerID != completion.ServerID {
+		return errors.New("persisted Agent identity does not match the root-owned enrollment completion record")
 	}
 	_, expectedMapping, expectedDropIn, err := BuildBrokerArtifacts(
 		uint32(identity.uid),
@@ -458,11 +504,18 @@ func restoreExistingAgentIdentity(
 		return fmt.Errorf("persist restored provisioning inventory: %w", err)
 	}
 
+	identityRecord, err := decodeEnrollmentIdentitySummary(summaryJSON)
+	if err != nil {
+		return fmt.Errorf("verify restored Agent identity summary: %w", err)
+	}
 	completion := provisionCompletion{
 		ProtocolVersion:  1,
 		AgentVersion:     releaseVersion,
 		ApplicationCount: len(request.Applications),
 		EnrollmentStatus: "registered",
+		AgentInstanceID:  identityRecord.AgentInstanceID,
+		AgentID:          identityRecord.AgentID,
+		ServerID:         identityRecord.ServerID,
 	}
 	completionJSON, err := json.Marshal(completion)
 	if err != nil {
@@ -570,7 +623,7 @@ func runEnrollAgentOperation(request ProvisionOperationRequest, response HelperR
 			response.RetrySafe = false
 			return writeOperationFailure(writer, errorWriter, response, errors.New("enrollment completion record does not match the installed inventory"))
 		}
-		if err := verifyExistingEnrollmentIdentity(inventory.Applications, inventory.ArtifactSHA256); err != nil {
+		if err := verifyExistingEnrollmentIdentity(inventory.Applications, inventory.ArtifactSHA256, completion); err != nil {
 			response.Phase = "recovery_required"
 			response.EnrollmentStatus = "unknown"
 			response.RetrySafe = false
@@ -670,6 +723,16 @@ func runEnrollAgentOperation(request ProvisionOperationRequest, response HelperR
 		return 1
 	}
 
+	identityRecord, err := decodeEnrollmentIdentitySummary(summaryJSON)
+	if err != nil {
+		response.EnrollmentStatus = "registered"
+		response.Phase = "broker_configuration"
+		response.Message = "Central enrollment succeeded, but the persisted Agent identity summary could not be verified. Preserve Agent state; do not repeat enrollment."
+		writeHelperResponse(writer, response)
+		fmt.Fprintln(errorWriter, response.Message)
+		return 1
+	}
+
 	response.EnrollmentStatus = "registered"
 	response.Phase = "broker_configuration"
 	brokerConfig, mappingJSON, dropIn, err := BuildBrokerArtifacts(
@@ -696,6 +759,9 @@ func runEnrollAgentOperation(request ProvisionOperationRequest, response HelperR
 		AgentVersion:     inventory.AgentVersion,
 		ApplicationCount: len(inventory.Applications),
 		EnrollmentStatus: "registered",
+		AgentInstanceID:  identityRecord.AgentInstanceID,
+		AgentID:          identityRecord.AgentID,
+		ServerID:         identityRecord.ServerID,
 	}
 	completionJSON, err := json.Marshal(completion)
 	if err != nil {
@@ -906,7 +972,10 @@ func readProvisionCompletion() (provisionCompletion, error) {
 	if err := decoder.Decode(&completion); err != nil || ensureJSONEOF(decoder) != nil ||
 		completion.ProtocolVersion != 1 || completion.AgentVersion == "" ||
 		completion.ApplicationCount < 1 || completion.ApplicationCount > 20 ||
-		completion.EnrollmentStatus != "registered" {
+		completion.EnrollmentStatus != "registered" ||
+		completion.AgentInstanceID == "" ||
+		completion.AgentID == "" ||
+		completion.ServerID == "" {
 		return provisionCompletion{}, errors.New("provisioning completion record is invalid")
 	}
 	return completion, nil
