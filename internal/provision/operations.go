@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/user"
+	"reflect"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -254,10 +255,27 @@ func runInstallAgentOperation(request ProvisionOperationRequest, response Helper
 		return writeOperationFailure(writer, errorWriter, response, errors.New("enrollment attempt metadata cannot be safely inspected"))
 	}
 	if attemptExists {
+		inventory, inventoryErr := readProvisionInventory()
+		completion, completionErr := readProvisionCompletion()
+		if inventoryErr == nil && completionErr == nil &&
+			inventory.AgentVersion == releaseManifest.Version &&
+			reflect.DeepEqual(inventory.Applications, request.Applications) &&
+			completion.AgentVersion == inventory.AgentVersion &&
+			completion.ApplicationCount == len(inventory.Applications) {
+			response.Success = true
+			response.Phase = "enrolled"
+			response.EnrollmentStatus = "registered"
+			response.RetrySafe = false
+			response.AgentVersion = completion.AgentVersion
+			response.ApplicationCount = completion.ApplicationCount
+			response.Message = "Existing NADI installation and enrollment are verified; continue with the remaining lifecycle operation."
+			writeHelperResponse(writer, response)
+			return 0
+		}
 		response.Phase = "existing_installation"
 		response.EnrollmentStatus = "unknown"
 		response.RetrySafe = false
-		return writeOperationFailure(writer, errorWriter, response, errors.New("an enrollment attempt already exists; do not retry"))
+		return writeOperationFailure(writer, errorWriter, response, errors.New("an enrollment attempt exists without a matching verified completion record; reconcile before retrying"))
 	}
 	if err := rejectExistingAgentState(); err != nil {
 		response.Phase = "existing_installation"
