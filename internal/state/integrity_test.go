@@ -73,11 +73,11 @@ func TestLoadReadOnlyRejectsModifiedPersistedState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	content = bytes.Replace(content, []byte("agent-integrity-test"), []byte("agent-tampered-test"), 1)
-	if bytes.Equal(content, nil) {
-		t.Fatal("test fixture unexpectedly became empty")
+	modified := bytes.Replace(content, []byte("agent-integrity-test"), []byte("agent-tampered-test"), 1)
+	if bytes.Equal(modified, content) {
+		t.Fatal("test fixture did not contain the expected state value")
 	}
-	if err := os.WriteFile(path, content, 0600); err != nil {
+	if err := os.WriteFile(path, modified, 0600); err != nil {
 		t.Fatal(err)
 	}
 
