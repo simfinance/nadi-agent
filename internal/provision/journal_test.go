@@ -87,6 +87,75 @@ func TestJournaledImmutableFileRejectsDifferentExistingContent(t *testing.T) {
 	}
 }
 
+func TestProvisionJournalRecoversAppliedFileAfterReload(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "provisioning-journal.json")
+	target := filepath.Join(directory, "created-file")
+
+	store, journal, err := newProvisionJournalForOperation(journalPath, "restore_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	index, err := store.AddIntent(&journal, "file", target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("created by interrupted RESTORE"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkApplied(&journal, index); err != nil {
+		t.Fatal(err)
+	}
+
+	reloadedStore, reloadedJournal, err := openProvisionJournal(journalPath)
+	if err != nil {
+		t.Fatalf("reload interrupted RESTORE journal: %v", err)
+	}
+	if err := reloadedStore.Rollback(&reloadedJournal, []string{directory}); err != nil {
+		t.Fatalf("rollback reloaded RESTORE journal: %v", err)
+	}
+
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Fatalf("fingerprint-matching transaction file remains after recovery: %v", err)
+	}
+	if reloadedJournal.Phase != "rolled_back" {
+		t.Fatalf("unexpected recovered journal phase %q", reloadedJournal.Phase)
+	}
+}
+
+func TestProvisionJournalRecoveryPreservesUnfingerprintedIntent(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "provisioning-journal.json")
+	target := filepath.Join(directory, "ambiguous-file")
+
+	store, journal, err := newProvisionJournalForOperation(journalPath, "restore_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AddIntent(&journal, "file", target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("result of interrupted mutation"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	reloadedStore, reloadedJournal, err := openProvisionJournal(journalPath)
+	if err != nil {
+		t.Fatalf("reload interrupted RESTORE journal: %v", err)
+	}
+	if err := reloadedStore.Rollback(&reloadedJournal, []string{directory}); err == nil {
+		t.Fatal("recovery must fail closed for an intent without a persisted fingerprint")
+	}
+
+	if _, err := os.Lstat(target); err != nil {
+		t.Fatalf("ambiguous transaction resource must be preserved: %v", err)
+	}
+	if reloadedJournal.Phase != "rollback_required" {
+		t.Fatalf("ambiguous recovery must retain rollback_required phase, got %q", reloadedJournal.Phase)
+	}
+}
+
 func TestProvisionJournalRecordsAndReloadsIntent(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "provisioning-journal.json")
