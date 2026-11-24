@@ -21,13 +21,13 @@ The root-owned file `/etc/nadi-agent/bridge-mappings.json` uses schema version 1
     "agent_gid": 1001,
     "applications": [
         {
-            "application_id": "central-application-id",
+            "application_id": "00000000-0000-4000-8000-000000000001",
             "application_key": "stable-bridge-application-key",
             "base_path": "/srv/www/example",
             "runtime_uid": 33,
             "runtime_gid": 33,
-            "credential_file": "/var/lib/nadi-bridge/central-application-id/credential",
-            "activation_state_file": "/run/nadi-agent/bridge-state/example.json"
+            "credential_file": "/var/lib/nadi-bridge/00000000-0000-4000-8000-000000000001/credential",
+            "activation_state_file": "/run/nadi-agent/bridge-state/00000000-0000-4000-8000-000000000001.json"
         }
     ]
 }
