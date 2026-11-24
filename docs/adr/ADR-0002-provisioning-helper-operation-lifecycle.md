@@ -48,7 +48,8 @@ Prohibited effects:
 - Must not enable or start services.
 
 Expected result:
-- `success=true`, `phase=installed`, `enrollment_status=not_started`, `retry_safe=true`.
+- A fresh install returns `success=true`, `phase=installed`, `enrollment_status=not_started`, `retry_safe=true`.
+- If a previous enrollment has a matching root-owned completion record and the same installed inventory/release, the operation may return `phase=enrolled`, `enrollment_status=registered`, `retry_safe=false` so the Artisan installer can resume at service activation without repeating enrollment.
 - No secret material in the response.
 
 ### 2. `enroll_agent`
@@ -97,7 +98,7 @@ The Bridge installer invokes the three fixed operations in order:
 2. `enroll_agent`
 3. `start_agent`
 
-It must stop immediately on a failed phase. If the enrollment phase has an unknown or registered outcome, it must display the helper's bounded non-secret status and explicitly prohibit a fresh-token retry until the local Agent state and Central registration are reconciled.
+It must stop immediately on a failed phase. On a repeated install, a verified existing enrollment may be reported by `install_agent`; the Bridge still invokes `enroll_agent`, which must return the matching verified completion idempotently, before calling `start_agent`. If enrollment has an unknown outcome without a verified completion record, the Bridge must display the bounded non-secret status and explicitly prohibit a fresh-token retry until local Agent state and Central registration are reconciled.
 
 The Bridge adapter must not modify Laravel, PHP-FPM, Nginx, firewall, Supervisor, or client application configuration without the explicit configuration approval required by the Master Architecture.
 
