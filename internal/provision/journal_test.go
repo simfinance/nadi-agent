@@ -170,3 +170,32 @@ func TestProvisionJournalRollbackAllowlistAcceptsExactManagedRoot(t *testing.T) 
 		t.Fatal("rollback allowlist must reject a parent outside the managed root")
 	}
 }
+
+
+func TestProvisionJournalRejectsRollbackAfterCommit(t *testing.T) {
+    directory := t.TempDir()
+    store, journal, err := newProvisionJournal(filepath.Join(directory, "journal.json"))
+    if err != nil {
+        t.Fatal(err)
+    }
+    if err := store.Commit(&journal); err != nil {
+        t.Fatal(err)
+    }
+    if err := store.Rollback(&journal, []string{directory}); err == nil {
+        t.Fatal("committed provisioning journal must not be rolled back")
+    }
+}
+
+func TestProvisionJournalRejectsCommitAfterRollback(t *testing.T) {
+    directory := t.TempDir()
+    store, journal, err := newProvisionJournal(filepath.Join(directory, "journal.json"))
+    if err != nil {
+        t.Fatal(err)
+    }
+    if err := store.Rollback(&journal, []string{directory}); err != nil {
+        t.Fatal(err)
+    }
+    if err := store.Commit(&journal); err == nil {
+        t.Fatal("rolled-back provisioning journal must not be committed")
+    }
+}
