@@ -2,9 +2,9 @@ package provision
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
