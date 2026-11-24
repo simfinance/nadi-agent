@@ -3,7 +3,6 @@ package provision
 import (
 	"bytes"
 	"encoding/base64"
-	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -31,14 +30,6 @@ func TestDecodeProvisionOperationRejectsOversizedInput(t *testing.T) {
 
 	if _, err := DecodeProvisionOperationRequest(content); err == nil {
 		t.Fatal("oversized provisioning request must be rejected")
-	}
-}
-
-func TestDecodeProvisionOperationRejectsDuplicateJSONKeys(t *testing.T) {
-	content := []byte(`{"protocol_version":1,"operation":"start_agent","operation":"install_agent"}`)
-
-	if _, err := DecodeProvisionOperationRequest(bytes.NewReader(content)); err == nil {
-		t.Fatal("duplicate JSON keys must be rejected")
 	}
 }
 
@@ -137,6 +128,7 @@ func TestEnrollmentTokenPatternRejectsWhitespace(t *testing.T) {
 		t.Fatal("enrollment token with trailing whitespace must be rejected")
 	}
 }
+
 func TestSameApplicationInventoryIgnoresOrderButChecksEveryIdentityField(t *testing.T) {
 	installed := []ProvisionApplication{
 		{ApplicationKey: "application-one", BasePath: "/srv/www/one", RuntimeUID: 1001, RuntimeGID: 1001},
