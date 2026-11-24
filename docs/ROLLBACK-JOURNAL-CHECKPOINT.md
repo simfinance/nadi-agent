@@ -64,8 +64,8 @@ A stale or malformed journal must block another install attempt until explicitly
 
 ## Remaining integration and verification
 
-- [x] Add a separate-process lock test: a second process cannot acquire an actively-held lock, and can acquire the persistent lock file after the first process releases it.
-- [ ] Add host crash/reboot recovery tests for stale lock files and lock acquisition after an actual process or host interruption.
+- [x] Add separate-process lock tests: a second process cannot acquire an actively-held lock; a new process can acquire the persistent lock file after release; and the kernel releases the flock when the lock-owning process exits abruptly.
+- [ ] Add host crash/reboot recovery tests on supported Linux filesystems, including journal and directory durability after power loss.
 - [x] Extend transaction tracking to identity RESTORE metadata, canonical directories, missing signed assets, broker mapping/drop-in artifacts, and completion metadata. The existing Agent state and credentials are excluded from the journal and are never modified by rollback.
 - [ ] Extend transaction tracking to broker mapping/drop-in writes performed by `enroll_agent` after Central registration. Preserve Agent state and report a non-retryable partial outcome if local reconciliation fails.
 - [ ] Add fault-injection tests at every mutation boundary, including process interruption between intent, filesystem mutation, fingerprint persistence, rollback deletion, and journal update.
@@ -74,8 +74,8 @@ A stale or malformed journal must block another install attempt until explicitly
 - [ ] Verify behavior on supported Linux filesystems and systemd hosts, including directory fsync and ownership behavior.
 - [x] Go validation workflow #345 (`45335634194`) passed on commit `77c7a7dc26d09e87e5694686433754b79d351536`: gofmt, `go test ./...`, `go test -race ./...`, `go vet ./...`, Linux AMD64, and Linux ARM64.
 - [x] Go validation workflow #347 (`45336076298`) passed on commit `9b4f7d8608de461c347f6e32fbcf531239f912ea`: gofmt, `go test ./...`, `go test -race ./...`, `go vet ./...`, Linux AMD64, and Linux ARM64.
-- [ ] Run Go validation for the separate-process provisioning lock test at the latest branch head.
+- [ ] Run Go validation for the abrupt-process-exit provisioning lock test at the latest branch head.
 - [ ] Add root/non-root/systemd end-to-end coverage on a disposable Linux host.
 - [ ] Confirm the Bridge adapter handles `rolled_back`, `recovery_required`, and retained committed-journal responses without prompting for a new token.
 
-The current implementation provides journal coverage for the fresh-install filesystem phase and the local filesystem mutations performed by identity RESTORE. RESTORE preserves the existing Agent state and credentials, and rollback is limited to fingerprint-matching resources created by that RESTORE transaction. It does not make account creation reversible, does not reverse the systemd daemon-reload operation, does not roll back Central enrollment, and does not make the complete three-operation lifecycle transactionally recoverable. The RESTORE implementation and persisted-journal reload tests passed Go validation workflow #345. The idempotent recovery test passed Go validation workflow #347. A separate-process provisioning lock test has since been added and requires CI validation at the latest branch head.
+The current implementation provides journal coverage for the fresh-install filesystem phase and the local filesystem mutations performed by identity RESTORE. RESTORE preserves the existing Agent state and credentials, and rollback is limited to fingerprint-matching resources created by that RESTORE transaction. It does not make account creation reversible, does not reverse the systemd daemon-reload operation, does not roll back Central enrollment, and does not make the complete three-operation lifecycle transactionally recoverable. The RESTORE implementation and persisted-journal reload tests passed Go validation workflow #345. The idempotent recovery test passed Go validation workflow #347. Separate-process provisioning lock tests passed workflow #349. An abrupt-process-exit lock-release test has since been added and requires CI validation at the latest branch head.
