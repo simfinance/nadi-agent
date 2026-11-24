@@ -136,3 +136,52 @@ func TestDecodeProvisionOperationRejectsDuplicateJSONKeys(t *testing.T) {
 		t.Fatal("duplicate JSON keys must be rejected")
 	}
 }
+
+
+func TestDecodeEnrollmentIdentitySummaryReturnsStableIdentity(t *testing.T) {
+    summary := []byte(`{
+        "protocol_version": 1,
+        "enrollment_status": "registered",
+        "agent_instance_id": "agent-instance-restore",
+        "agent_id": "central-agent-restore",
+        "server_id": "central-server-restore",
+        "applications": [
+            {
+                "application_id": "00000000-0000-4000-8000-000000000001",
+                "application_key": "application-one",
+                "application_name": "Application One",
+                "environment": "production",
+                "registration_id": "registration-one"
+            }
+        ]
+    }`)
+
+    identity, err := decodeEnrollmentIdentitySummary(summary)
+    if err != nil {
+        t.Fatalf("valid enrollment identity summary was rejected: %v", err)
+    }
+
+    if identity.AgentInstanceID != "agent-instance-restore" ||
+        identity.AgentID != "central-agent-restore" ||
+        identity.ServerID != "central-server-restore" {
+        t.Fatalf("unexpected identity summary: %#v", identity)
+    }
+}
+
+func TestDecodeEnrollmentIdentitySummaryRejectsIncompleteIdentity(t *testing.T) {
+    summary := []byte(`{
+        "protocol_version": 1,
+        "enrollment_status": "registered",
+        "agent_instance_id": "agent-instance-restore",
+        "applications": [
+            {
+                "application_id": "00000000-0000-4000-8000-000000000001",
+                "application_key": "application-one"
+            }
+        ]
+    }`)
+
+    if _, err := decodeEnrollmentIdentitySummary(summary); err == nil {
+        t.Fatal("incomplete Central identity must be rejected")
+    }
+}
