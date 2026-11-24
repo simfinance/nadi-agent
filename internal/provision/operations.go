@@ -347,7 +347,6 @@ func runInstallAgentOperation(request ProvisionOperationRequest, response Helper
 	return 0
 }
 
-
 func verifyExistingEnrollmentIdentity(
 	applications []ProvisionApplication,
 	artifactSHA256 string,
