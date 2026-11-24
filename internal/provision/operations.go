@@ -262,7 +262,8 @@ func runInstallAgentOperation(request ProvisionOperationRequest, response Helper
 			inventory.ArtifactSHA256 == artifact.SHA256 &&
 			sameApplicationInventory(inventory.Applications, request.Applications) &&
 			completion.AgentVersion == inventory.AgentVersion &&
-			completion.ApplicationCount == len(inventory.Applications) {
+			completion.ApplicationCount == len(inventory.Applications) &&
+			verifyAgentStateFile() == nil {
 			response.Success = true
 			response.Phase = "enrolled"
 			response.EnrollmentStatus = "registered"
@@ -510,6 +511,9 @@ func runStartAgentOperation(response HelperResponse, writer io.Writer, errorWrit
 	if err := verifyAgentStateFile(); err != nil {
 		return writeOperationFailure(writer, errorWriter, response, err)
 	}
+	if err := verifyInstalledNADIAssets(); err != nil {
+		return writeOperationFailure(writer, errorWriter, response, err)
+	}
 	if err := activateAgentServices(); err != nil {
 		return writeOperationFailure(writer, errorWriter, response, err)
 	}
@@ -664,6 +668,28 @@ func readProvisionCompletion() (provisionCompletion, error) {
 		return provisionCompletion{}, errors.New("provisioning completion record is invalid")
 	}
 	return completion, nil
+}
+
+func verifyInstalledNADIAssets() error {
+	assets := []struct {
+		path string
+		size int64
+	}{
+		{path: agentBinaryPath, size: maximumArtifactBytes},
+		{path: activationPublicKeyPath, size: 64 * 1024},
+		{path: agentUnitPath, size: 64 * 1024},
+		{path: brokerUnitPath, size: 64 * 1024},
+		{path: brokerMappingPath, size: 64 * 1024},
+		{path: brokerDropInPath, size: 64 * 1024},
+	}
+
+	for _, asset := range assets {
+		if _, err := readRootOwnedRegularFile(asset.path, asset.size); err != nil {
+			return fmt.Errorf("required root-owned NADI asset %s is missing or unsafe", filepath.Base(asset.path))
+		}
+	}
+
+	return nil
 }
 
 func verifyAgentStateFile() error {
