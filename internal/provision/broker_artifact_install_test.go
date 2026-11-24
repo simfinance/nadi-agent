@@ -107,6 +107,42 @@ func TestInstallBrokerArtifactsWritesOnlyValidatedDestinations(t *testing.T) {
 	}
 }
 
+func TestWriteOwnedAtomicFileRefusesUnapprovedReplacement(t *testing.T) {
+	parent := t.TempDir()
+	path := filepath.Join(parent, "managed.json")
+	original := []byte("{\"version\":1}\n")
+
+	if err := os.WriteFile(path, original, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeOwnedAtomicFile(path, []byte("{\"version\":2}\n"), 0600, os.Getuid(), os.Getgid()); err == nil {
+		t.Fatal("existing managed file must not be overwritten without an approved update")
+	}
+
+	actual, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(actual) != string(original) {
+		t.Fatal("existing managed file changed after rejected replacement")
+	}
+}
+
+func TestWriteOwnedAtomicFileAcceptsIdenticalExistingFile(t *testing.T) {
+	parent := t.TempDir()
+	path := filepath.Join(parent, "managed.json")
+	content := []byte("{\"version\":1}\n")
+
+	if err := os.WriteFile(path, content, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeOwnedAtomicFile(path, content, 0600, os.Getuid(), os.Getgid()); err != nil {
+		t.Fatalf("identical managed file should be idempotent: %v", err)
+	}
+}
+
 func TestInstallBrokerArtifactsRejectsMismatchedDropIn(t *testing.T) {
 	root := t.TempDir()
 	config := handoffbroker.Config{
