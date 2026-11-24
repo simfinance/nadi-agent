@@ -11,7 +11,9 @@ import (
     "path/filepath"
     "runtime"
     "strings"
+    "strconv"
     "syscall"
+    "os/user"
 )
 
 const (
@@ -485,15 +487,14 @@ func verifyAgentStateFile() error {
     }
     stat, ok := metadata.Sys().(*syscall.Stat_t)
     account, accountErr := user.Lookup(agentAccountName)
-    if !ok || accountErr != nil || stat.Uid != uint32(mustAtoi(account.Uid)) {
+    if !ok || accountErr != nil {
+        return errors.New("dedicated NADI runtime account cannot be verified")
+    }
+    expectedUID, parseErr := strconv.Atoi(account.Uid)
+    if parseErr != nil || expectedUID < 1 || stat.Uid != uint32(expectedUID) {
         return errors.New("Agent state ownership does not match the dedicated non-root runtime account")
     }
     return nil
-}
-
-func mustAtoi(value string) int {
-    parsed, _ := strconv.Atoi(value)
-    return parsed
 }
 
 func writeOperationFailure(writer io.Writer, errorWriter io.Writer, response HelperResponse, err error) int {
