@@ -7,18 +7,15 @@ import (
     "nadi-agent/internal/state"
 )
 
-func TestVerifyReadOnlyPreservesExistingEnrollmentIdentity(t *testing.T)
-{
+func TestVerifyReadOnlyPreservesExistingEnrollmentIdentity(t *testing.T) {
     directory := t.TempDir()
     store, err := state.Open(directory)
-    if err != nil
-    {
+    if err != nil {
         t.Fatal(err)
     }
 
     fingerprint, err := machineFingerprint()
-    if err != nil
-    {
+    if err != nil {
         t.Fatal(err)
     }
 
@@ -30,34 +27,28 @@ func TestVerifyReadOnlyPreservesExistingEnrollmentIdentity(t *testing.T)
         EnrollmentStatus: "registered",
         CreatedAt: time.Now().UTC(),
     }
-    if err := store.Save(expected); err != nil
-    {
+    if err := store.Save(expected); err != nil {
         t.Fatal(err)
     }
-    if err := store.Close(); err != nil
-    {
+    if err := store.Close(); err != nil {
         t.Fatal(err)
     }
 
     actual, err := VerifyReadOnly(directory)
-    if err != nil
-    {
+    if err != nil {
         t.Fatalf("existing identity verification failed: %v", err)
     }
     if actual.AgentInstanceID != expected.AgentInstanceID ||
         actual.CentralAgentID != expected.CentralAgentID ||
-        actual.CentralServerID != expected.CentralServerID
-    {
+        actual.CentralServerID != expected.CentralServerID {
         t.Fatalf("existing Agent identity changed: %#v", actual)
     }
 }
 
-func TestVerifyReadOnlyRejectsDifferentMachineIdentity(t *testing.T)
-{
+func TestVerifyReadOnlyRejectsDifferentMachineIdentity(t *testing.T) {
     directory := t.TempDir()
     store, err := state.Open(directory)
-    if err != nil
-    {
+    if err != nil {
         t.Fatal(err)
     }
     if err := store.Save(state.State{
@@ -66,17 +57,14 @@ func TestVerifyReadOnlyRejectsDifferentMachineIdentity(t *testing.T)
         CentralAgentID: "central-agent",
         CentralServerID: "central-server",
         EnrollmentStatus: "registered",
-    }); err != nil
-    {
+    }); err != nil {
         t.Fatal(err)
     }
-    if err := store.Close(); err != nil
-    {
+    if err := store.Close(); err != nil {
         t.Fatal(err)
     }
 
-    if _, err := VerifyReadOnly(directory); err != ErrMachineIdentityChanged
-    {
+    if _, err := VerifyReadOnly(directory); err != ErrMachineIdentityChanged {
         t.Fatalf("expected machine identity mismatch, got %v", err)
     }
 }
