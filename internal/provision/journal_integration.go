@@ -67,11 +67,23 @@ func ensureDirectoryTreeJournaled(
 	store *provisionJournalStore,
 	journal *provisionJournal,
 ) error {
-	if root != string(os.PathSeparator) ||
+	if !filepath.IsAbs(root) ||
+		filepath.Clean(root) != root ||
 		!filepath.IsAbs(directory) ||
 		filepath.Clean(directory) != directory ||
 		directory == root {
-		return errors.New("journaled directory destination must be beneath the filesystem root")
+		return errors.New("journaled directory paths must be absolute, canonical, and distinct")
+	}
+
+	rootMetadata, err := os.Lstat(root)
+	if err != nil {
+		return fmt.Errorf("inspect journaled directory root: %w", err)
+	}
+	rootStat, ok := rootMetadata.Sys().(*syscall.Stat_t)
+	if !ok || rootMetadata.Mode()&os.ModeSymlink != 0 || !rootMetadata.IsDir() ||
+		int(rootStat.Uid) != ownerUID || int(rootStat.Gid) != ownerGID ||
+		rootMetadata.Mode().Perm()&0022 != 0 {
+		return errors.New("journaled directory root ownership or permissions are unsafe")
 	}
 
 	relative, err := filepath.Rel(root, directory)
