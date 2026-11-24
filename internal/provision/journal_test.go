@@ -6,6 +6,87 @@ import (
 	"testing"
 )
 
+func TestJournaledImmutableFilePreservesMatchingExistingFile(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "journal.json")
+	target := filepath.Join(directory, "existing-file")
+	content := []byte("existing immutable content")
+
+	if err := os.WriteFile(target, content, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	store, journal, err := newProvisionJournal(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := installImmutableFileJournaled(
+		target,
+		content,
+		0600,
+		os.Geteuid(),
+		os.Getegid(),
+		store,
+		&journal,
+	); err != nil {
+		t.Fatalf("matching existing immutable file should be accepted: %v", err)
+	}
+
+	if len(journal.Actions) != 0 {
+		t.Fatalf("existing file must not be recorded as transaction-created: %#v", journal.Actions)
+	}
+
+	actual, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(actual) != string(content) {
+		t.Fatalf("existing file changed: %q", actual)
+	}
+}
+
+func TestJournaledImmutableFileRejectsDifferentExistingContent(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "journal.json")
+	target := filepath.Join(directory, "existing-file")
+	original := []byte("existing immutable content")
+
+	if err := os.WriteFile(target, original, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	store, journal, err := newProvisionJournal(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = installImmutableFileJournaled(
+		target,
+		[]byte("replacement content"),
+		0600,
+		os.Geteuid(),
+		os.Getegid(),
+		store,
+		&journal,
+	)
+	if err == nil {
+		t.Fatal("existing immutable file with different content must be rejected")
+	}
+
+	if len(journal.Actions) != 0 {
+		t.Fatalf("rejected existing file must not be journaled as transaction-created: %#v", journal.Actions)
+	}
+
+	actual, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(actual) != string(original) {
+		t.Fatalf("existing file was modified: %q", actual)
+	}
+}
+
 func TestProvisionJournalRecordsAndReloadsIntent(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "provisioning-journal.json")
