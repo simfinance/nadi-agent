@@ -293,9 +293,9 @@ All three helper operations are internal to the single Artisan installer executi
 
 ### Current validation status
 
-- Bridge workflow #62 (run ID 45323229422) passed PHP 8.2 and PHP 8.3 lint, PHPUnit, trust-anchor checks, bundled Agent binary verification, and Composer distribution checks: https://github.com/simfinance/nadi-laravel-agent/actions/runs/45323229422.
-- Agent workflow #251 (run ID 45323236586) is marked `action_required` by GitHub and exposed no jobs, so it has not validated the new Go operations. The previous workflow #239 passed only the earlier PHP-FPM hardening source, not this lifecycle implementation: https://github.com/simfinance/nadi-agent/actions/runs/45323236586.
-- Go formatting, unit/race tests, vet, and AMD64/ARM64 builds for the accepted lifecycle implementation remain unverified.
+- Bridge workflow #71 (run ID 45324280223) passed PHP 8.2 and PHP 8.3 lint, PHPUnit, trust-anchor checks, bundled Agent binary verification, and Composer distribution checks, including the deferred token prompt and recovery flow: https://github.com/simfinance/nadi-laravel-agent/actions/runs/45324280223.
+- Agent workflow #269 (run ID 45324422142) completed every validation job successfully on Go source commit `49a179b1fc7b28742b4e5ac0ba12219e3117ed0d`: gofmt, `go test ./...`, `go test -race ./...`, `go vet ./...`, Linux AMD64 build, and Linux ARM64 build. The workflow was subsequently cancelled during concurrency cleanup after all jobs had reported success: https://github.com/simfinance/nadi-agent/actions/runs/45324422142.
+- The latest Agent branch head is `de3ed53f3f5800f45d48768275ab14c4e3e33ab9`; changes after the validated Go source commit are documentation-only. Workflow #270 is running against that documentation head.
 
 ### Remaining blockers
 
@@ -332,3 +332,14 @@ Confirmed constraints preserved by this increment:
 - **Bridge runtime identity:** Installer-managed per-application Bridge identity and environment configuration must be completed without silently editing client application configuration.
 
 These are release blockers, not reasons to weaken the two-command customer experience. No Central source or production host was modified.
+
+
+## Lifecycle idempotency and recovery hardening — 2026-11-24
+
+- [x] The enrollment-attempt marker is written immediately before invoking the non-root Agent enrollment command, after manifest and local identity validation.
+- [x] A later operation with an attempt marker but no valid completion record fails closed as unknown/non-retryable.
+- [x] A verified completion record is bound to the root-owned inventory, signed release version, signed artifact SHA-256, and complete application identity mapping.
+- [x] Re-running the Artisan installer after a completed enrollment does not request or send a new enrollment token. The helper verifies the existing enrollment and the Bridge proceeds to the fixed service-start operation.
+- [x] The Bridge token callback is invoked only after `install_agent` confirms a fresh installation; the token and serialized stdin buffers are zeroed after use.
+- [x] Before service activation, the helper verifies the Agent state file metadata without reading its contents and checks the presence/ownership/mode of the fixed Agent, key, systemd, broker mapping, and drop-in assets.
+- [x] Agent unit tests, race tests, vet, AMD64 build, and ARM64 build all completed successfully in workflow #269 as recorded above.
