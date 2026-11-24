@@ -654,10 +654,10 @@ func restoreExistingAgentIdentity(
 	}
 	completion := provisionCompletion{
 		ProtocolVersion:  1,
-		AgentVersion:    releaseVersion,
+		AgentVersion:     releaseVersion,
 		ApplicationCount: len(request.Applications),
 		EnrollmentStatus: "registered",
-		AgentInstanceID: identityRecord.AgentInstanceID,
+		AgentInstanceID:  identityRecord.AgentInstanceID,
 		AgentID:          identityRecord.AgentID,
 		ServerID:         identityRecord.ServerID,
 	}
