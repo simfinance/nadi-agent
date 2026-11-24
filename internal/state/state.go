@@ -91,11 +91,11 @@ type State struct {
 }
 
 type Store struct {
-	directory string
-	lockFile  *os.File
+	directory  string
+	lockFile   *os.File
 	privateKey []byte
-	mutex     sync.Mutex
-	closed    bool
+	mutex      sync.Mutex
+	closed     bool
 }
 
 func Open(directory string) (*Store, error) {
