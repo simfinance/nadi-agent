@@ -299,6 +299,87 @@ func validateApplicationTargetsAt(request ProvisionRequest, configurationRoot st
 	return nil
 }
 
+func validateRootOwnedDirectoryChain(root string, target string) error {
+	if !filepath.IsAbs(root) || !filepath.IsAbs(target) {
+		return errors.New("directory paths must be absolute")
+	}
+
+	relative, err := filepath.Rel(root, target)
+	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
+		return errors.New("target directory must be beneath the PHP-FPM configuration root")
+	}
+
+	current := root
+	for _, segment := range strings.Split(relative, string(os.PathSeparator)) {
+		if segment == "" || segment == "." || segment == ".." {
+			return errors.New("PHP-FPM directory path contains an invalid component")
+		}
+
+		current = filepath.Join(current, segment)
+		metadata, err := os.Lstat(current)
+		if err != nil {
+			return fmt.Errorf("inspect directory component: %w", err)
+		}
+		if metadata.Mode()&os.ModeSymlink != 0 || !metadata.IsDir() {
+			return errors.New("PHP-FPM directory path contains a symlink or non-directory component")
+		}
+
+		stat, ok := metadata.Sys().(*syscall.Stat_t)
+		if !ok || stat.Uid != 0 || metadata.Mode().Perm()&0022 != 0 {
+			return errors.New("PHP-FPM directory components must be root-owned and not group/other writable")
+		}
+	}
+
+	return nil
+}
+
+func readRootOwnedRegularFile(path string, maximumSize int64) ([]byte, error) {
+	pathMetadata, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if pathMetadata.Mode()&os.ModeSymlink != 0 || !pathMetadata.Mode().IsRegular() || pathMetadata.Size() < 1 || pathMetadata.Size() > maximumSize {
+		return nil, errors.New("file must be a bounded regular non-symlink file")
+	}
+
+	pathStat, ok := pathMetadata.Sys().(*syscall.Stat_t)
+	if !ok || pathStat.Uid != 0 || pathMetadata.Mode().Perm()&0022 != 0 {
+		return nil, errors.New("file must be root-owned and not group/other writable")
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	openedMetadata, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	openedStat, ok := openedMetadata.Sys().(*syscall.Stat_t)
+	if !ok ||
+		openedStat.Dev != pathStat.Dev ||
+		openedStat.Ino != pathStat.Ino ||
+		openedStat.Uid != 0 ||
+		!openedMetadata.Mode().IsRegular() ||
+		openedMetadata.Mode().Perm()&0022 != 0 ||
+		openedMetadata.Size() < 1 ||
+		openedMetadata.Size() > maximumSize {
+		return nil, errors.New("file changed during access or has unsafe metadata")
+	}
+
+	content, err := io.ReadAll(io.LimitReader(file, maximumSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(content) == 0 || int64(len(content)) > maximumSize {
+		return nil, errors.New("file content is empty or exceeds the size limit")
+	}
+
+	return content, nil
+}
+
 func readPHPFPMRuntimeIdentities(configurationRoot string) (map[string]struct{}, error) {
 	if err := ensureNoSymlinkPath(configurationRoot); err != nil {
 		return nil, fmt.Errorf("PHP-FPM configuration root is unsafe: %w", err)
@@ -326,19 +407,11 @@ func readPHPFPMRuntimeIdentities(configurationRoot string) (map[string]struct{},
 	identities := make(map[string]struct{}, len(poolFiles))
 
 	for _, poolPath := range poolFiles {
-		metadata, err := os.Lstat(poolPath)
-		if err != nil {
-			return nil, fmt.Errorf("inspect PHP-FPM pool configuration: %w", err)
-		}
-		if metadata.Mode()&os.ModeSymlink != 0 || !metadata.Mode().IsRegular() || metadata.Size() < 1 || metadata.Size() > 64*1024 {
-			return nil, errors.New("PHP-FPM pool configuration must be a bounded regular non-symlink file")
-		}
-		stat, ok := metadata.Sys().(*syscall.Stat_t)
-		if !ok || stat.Uid != 0 || metadata.Mode().Perm()&0022 != 0 {
-			return nil, errors.New("PHP-FPM pool configuration must be root-owned and not group/other writable")
+		if err := validateRootOwnedDirectoryChain(configurationRoot, filepath.Dir(poolPath)); err != nil {
+			return nil, fmt.Errorf("PHP-FPM pool configuration directory is unsafe: %w", err)
 		}
 
-		content, err := os.ReadFile(poolPath)
+		content, err := readRootOwnedRegularFile(poolPath, 64*1024)
 		if err != nil {
 			return nil, fmt.Errorf("read PHP-FPM pool configuration: %w", err)
 		}
@@ -579,22 +652,9 @@ func validateAgentGroupEntry(expectedGID int) error {
 }
 
 func readRootOwnedSystemFile(path string, maximumSize int64) ([]byte, error) {
-	metadata, err := os.Lstat(path)
+	content, err := readRootOwnedRegularFile(path, maximumSize)
 	if err != nil {
-		return nil, fmt.Errorf("inspect %s: %w", path, err)
-	}
-	if metadata.Mode()&os.ModeSymlink != 0 || !metadata.Mode().IsRegular() || metadata.Size() < 1 || metadata.Size() > maximumSize {
-		return nil, fmt.Errorf("%s must be a bounded regular non-symlink file", path)
-	}
-
-	stat, ok := metadata.Sys().(*syscall.Stat_t)
-	if !ok || stat.Uid != 0 || metadata.Mode().Perm()&0022 != 0 {
-		return nil, fmt.Errorf("%s must be root-owned and not group/other writable", path)
-	}
-
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
+		return nil, fmt.Errorf("read trusted system file %s: %w", path, err)
 	}
 
 	return content, nil
