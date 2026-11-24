@@ -265,17 +265,18 @@ func runInstallAgentOperation(request ProvisionOperationRequest, response Helper
 			inventory.ArtifactSHA256 == artifact.SHA256 &&
 			sameApplicationInventory(inventory.Applications, request.Applications) &&
 			completion.AgentVersion == inventory.AgentVersion &&
-			completion.ApplicationCount == len(inventory.Applications) &&
-			verifyAgentStateFile() == nil {
-			response.Success = true
-			response.Phase = "enrolled"
-			response.EnrollmentStatus = "registered"
-			response.RetrySafe = false
-			response.AgentVersion = completion.AgentVersion
-			response.ApplicationCount = completion.ApplicationCount
-			response.Message = "Existing NADI installation and enrollment are verified; continue with the remaining lifecycle operation."
-			writeHelperResponse(writer, response)
-			return 0
+			completion.ApplicationCount == len(inventory.Applications) {
+			if err := verifyExistingEnrollmentIdentity(request.Applications, inventory.ArtifactSHA256); err == nil {
+				response.Success = true
+				response.Phase = "enrolled"
+				response.EnrollmentStatus = "registered"
+				response.RetrySafe = false
+				response.AgentVersion = completion.AgentVersion
+				response.ApplicationCount = completion.ApplicationCount
+				response.Message = "Existing NADI installation and Agent identity are verified; continue with the remaining lifecycle operation."
+				writeHelperResponse(writer, response)
+				return 0
+			}
 		}
 		response.Phase = "existing_installation"
 		response.EnrollmentStatus = "unknown"
@@ -344,6 +345,39 @@ func runInstallAgentOperation(request ProvisionOperationRequest, response Helper
 	response.Message = "NADI Agent assets and validated application inventory installed; enrollment has not started."
 	writeHelperResponse(writer, response)
 	return 0
+}
+
+
+func verifyExistingEnrollmentIdentity(
+	applications []ProvisionApplication,
+	artifactSHA256 string,
+) error {
+	identity, err := ensureAgentAccount()
+	if err != nil {
+		return fmt.Errorf("verify dedicated Agent runtime account: %w", err)
+	}
+	if err := verifyAgentStateFile(); err != nil {
+		return err
+	}
+	if err := verifyInstalledAgentBinaryDigest(artifactSHA256); err != nil {
+		return err
+	}
+
+	summaryJSON, err := runAgentIdentityVerification(identity)
+	if err != nil {
+		return err
+	}
+	_, _, _, err = BuildBrokerArtifacts(
+		uint32(identity.uid),
+		uint32(identity.gid),
+		ProvisionRequest{Applications: applications},
+		summaryJSON,
+	)
+	if err != nil {
+		return fmt.Errorf("verify existing enrollment application identity: %w", err)
+	}
+
+	return nil
 }
 
 func restoreExistingAgentIdentity(
