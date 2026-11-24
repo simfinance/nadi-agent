@@ -3,6 +3,7 @@ package provision
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -74,7 +75,7 @@ func TestWriteHelperResponseUsesBoundedProtocolFields(t *testing.T) {
 }
 
 func TestSafeHelperMessageTruncatesLongErrors(t *testing.T) {
-	message := safeHelperMessage(strings.NewReader(strings.Repeat("x", 600)).Error())
+	message := safeHelperMessage(errors.New(strings.Repeat("x", 600)))
 	if len(message) > 512 {
 		t.Fatalf("helper message exceeded 512 bytes: %d", len(message))
 	}
