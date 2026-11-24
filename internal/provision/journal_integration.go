@@ -1,10 +1,12 @@
 package provision
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -242,11 +244,56 @@ func installImmutableFileJournaled(
 	store *provisionJournalStore,
 	journal *provisionJournal,
 ) error {
+	if err := ensureNoSymlinkPath(filepath.Dir(path)); err != nil {
+		return fmt.Errorf("installation destination parent is unsafe: %w", err)
+	}
+
 	if metadata, err := os.Lstat(path); err == nil {
 		if metadata.Mode()&os.ModeSymlink != 0 || !metadata.Mode().IsRegular() {
 			return errors.New("existing installation destination is not a regular file")
 		}
-		return installImmutableFile(path, content, mode, uid, gid)
+
+		stat, ok := metadata.Sys().(*syscall.Stat_t)
+		if !ok ||
+			int(stat.Uid) != uid ||
+			int(stat.Gid) != gid ||
+			metadata.Mode().Perm() != mode ||
+			metadata.Size() != int64(len(content)) {
+			return errors.New("existing installation destination does not match the immutable file policy")
+		}
+
+		descriptor, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+		if err != nil {
+			return fmt.Errorf("open existing immutable installation file: %w", err)
+		}
+		file := os.NewFile(uintptr(descriptor), path)
+		defer file.Close()
+
+		openedMetadata, err := file.Stat()
+		if err != nil {
+			return fmt.Errorf("inspect existing immutable installation file: %w", err)
+		}
+		openedStat, ok := openedMetadata.Sys().(*syscall.Stat_t)
+		if !ok ||
+			openedStat.Dev != stat.Dev ||
+			openedStat.Ino != stat.Ino ||
+			openedStat.Uid != stat.Uid ||
+			openedStat.Gid != stat.Gid ||
+			!openedMetadata.Mode().IsRegular() ||
+			openedMetadata.Mode().Perm() != mode ||
+			openedMetadata.Size() != int64(len(content)) {
+			return errors.New("existing immutable installation file changed during inspection")
+		}
+
+		existing, err := io.ReadAll(io.LimitReader(file, int64(len(content))+1))
+		if err != nil {
+			return fmt.Errorf("read existing immutable installation file: %w", err)
+		}
+		if !bytes.Equal(existing, content) {
+			return errors.New("refusing to replace an existing immutable installation file")
+		}
+
+		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
