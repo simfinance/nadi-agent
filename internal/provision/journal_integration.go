@@ -382,6 +382,22 @@ func recoverProvisionJournalForInstall(
 			!sameApplicationInventory(inventory.Applications, applications) {
 			return false, errors.New("committed provisioning journal does not match the installed inventory; manual recovery is required")
 		}
+		if journal.Operation == "restore_agent" {
+			completion, completionErr := readProvisionCompletion()
+			if completionErr != nil ||
+				completion.AgentVersion != releaseVersion ||
+				completion.ApplicationCount != len(applications) ||
+				completion.EnrollmentStatus != "registered" {
+				return false, errors.New("committed identity restore journal has no matching enrollment completion record")
+			}
+			if err := removeProvisionJournal(store, "committed"); err != nil {
+				return false, err
+			}
+			return false, nil
+		}
+		if journal.Operation != "install_agent" {
+			return false, errors.New("committed provisioning journal has an unsupported operation")
+		}
 		if err := removeProvisionJournal(store, "committed"); err != nil {
 			return false, err
 		}
