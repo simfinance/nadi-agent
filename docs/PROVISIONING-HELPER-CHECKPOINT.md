@@ -217,6 +217,8 @@ The current helper orchestration must not be treated as release-ready because th
 - The document also requires a separate fixed operation for enabling and starting `nadi-agent.service`.
 
 The recommended resolution is to split the fixed helper operations into `install_agent` (install only), `enroll_agent` (execute the signed-inventory enrollment as `nadi-agent`, token via stdin), and `start_agent` (enable/start only the fixed NADI services after enrollment and broker mapping verification). This is a proposed contract clarification, not an approved architecture change. Do not wire or release the current combined orchestration until the contract is approved and the Bridge adapter is updated consistently.
+The operation split proposal is documented in [ADR-0002](ADR-0002-provisioning-helper-operation-lifecycle.md), status Proposed — awaiting explicit approval. It is not an implementation authorization.
+
 
 Additional gaps remain:
 
