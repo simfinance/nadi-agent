@@ -332,33 +332,33 @@ func TestValidateConfigAcceptsRootOwnedExternalCredentialDirectory(t *testing.T)
 
 
 func TestValidateConfigRejectsDuplicateRuntimeUIDs(t *testing.T) {
-    first := Mapping{
-        ApplicationID:       "00000000-0000-4000-8000-000000000001",
-        ApplicationKey:      "first-app",
-        BasePath:            "/srv/www/first",
-        RuntimeUID:          33,
-        RuntimeGID:          33,
-        CredentialFile:      "/var/lib/nadi-bridge/00000000-0000-4000-8000-000000000001/credential",
-        ActivationStateFile: "/run/nadi-agent/bridge-state/00000000-0000-4000-8000-000000000001.json",
-    }
-    second := Mapping{
-        ApplicationID:       "00000000-0000-4000-8000-000000000002",
-        ApplicationKey:      "second-app",
-        BasePath:            "/srv/www/second",
-        RuntimeUID:          33,
-        RuntimeGID:          33,
-        CredentialFile:      "/var/lib/nadi-bridge/00000000-0000-4000-8000-000000000002/credential",
-        ActivationStateFile: "/run/nadi-agent/bridge-state/00000000-0000-4000-8000-000000000002.json",
-    }
+	first := Mapping{
+		ApplicationID:       "00000000-0000-4000-8000-000000000001",
+		ApplicationKey:      "first-app",
+		BasePath:            "/srv/www/first",
+		RuntimeUID:          33,
+		RuntimeGID:          33,
+		CredentialFile:      "/var/lib/nadi-bridge/00000000-0000-4000-8000-000000000001/credential",
+		ActivationStateFile: "/run/nadi-agent/bridge-state/00000000-0000-4000-8000-000000000001.json",
+	}
+	second := Mapping{
+		ApplicationID:       "00000000-0000-4000-8000-000000000002",
+		ApplicationKey:      "second-app",
+		BasePath:            "/srv/www/second",
+		RuntimeUID:          33,
+		RuntimeGID:          33,
+		CredentialFile:      "/var/lib/nadi-bridge/00000000-0000-4000-8000-000000000002/credential",
+		ActivationStateFile: "/run/nadi-agent/bridge-state/00000000-0000-4000-8000-000000000002.json",
+	}
 
-    config := Config{
-        SchemaVersion: 1,
-        AgentUID:      1001,
-        AgentGID:      1001,
-        Applications:  []Mapping{first, second},
-    }
+	config := Config{
+		SchemaVersion: 1,
+		AgentUID:      1001,
+		AgentGID:      1001,
+		Applications:  []Mapping{first, second},
+	}
 
-    if err := validateConfig(config); err == nil {
-        t.Fatal("duplicate application runtime UID must be rejected")
-    }
+	if err := validateConfig(config); err == nil {
+		t.Fatal("duplicate application runtime UID must be rejected")
+	}
 }
