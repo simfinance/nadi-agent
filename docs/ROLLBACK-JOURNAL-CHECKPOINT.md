@@ -1,6 +1,6 @@
 # Provisioning Rollback Journal — Implementation Checkpoint
 
-Status: journal core and the fresh-install (`install_agent`) integration are implemented in the current branch. Restore, Bridge artifact reconciliation after enrollment, concurrency control, failure-injection coverage, and full E2E validation remain pending. This is not a production-ready rollback implementation.
+Status: journal core, fresh-install (`install_agent`) integration, and exclusive helper-operation locking are implemented in the current branch. Restore, Bridge artifact reconciliation after enrollment, failure-injection coverage, and full E2E validation remain pending. This is not a production-ready rollback implementation.
 
 ## Safety contract
 
@@ -51,11 +51,12 @@ The helper must create the journal before the first reversible filesystem mutati
 - [x] The fixed `nadi-agent` account is explicitly retained; the helper does not attempt to delete an account that may predate the transaction or be in use.
 - [x] Existing directories with mismatched ownership or mode are rejected instead of silently chmodded by the journal-aware fresh-install path.
 - [x] A stale in-progress journal is rolled back before a new fresh install. A committed journal is accepted only when the root-owned inventory matches the signed release and requested application inventory.
+- [x] All three privileged helper operations are serialized with an exclusive, root-owned mode-0600 lock at `/etc/.nadi-provisioning.lock`; concurrent invocations fail closed.
 - [x] Added unit tests for file/directory rollback, modified-resource refusal, un-fingerprinted intent refusal, retained service account, journal parent permissions, and journal-aware installation helpers.
 
 ## Remaining integration and verification
 
-- [ ] Add serialization/locking so concurrent helper invocations cannot race through install, enrollment, and service activation.
+- [ ] Add crash/reboot recovery tests for stale lock files and lock acquisition across separate processes.
 - [ ] Extend transaction tracking to the RESTORE metadata path without ever touching the existing Agent state or credentials.
 - [ ] Define the recovery behavior for broker mapping/drop-in writes after Central enrollment. Those writes occur after the irreversible enrollment boundary; Agent state must be preserved and local rollback must not imply Central enrollment was undone.
 - [ ] Add fault-injection tests at every mutation boundary, including process interruption between intent, filesystem mutation, fingerprint persistence, rollback deletion, and journal update.
