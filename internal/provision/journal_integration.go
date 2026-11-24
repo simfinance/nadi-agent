@@ -92,6 +92,8 @@ func ensureDirectoryTreeJournaled(
 		return errors.New("journaled directory destination is outside the installation root")
 	}
 
+	rootUID := int(rootStat.Uid)
+	rootGID := int(rootStat.Gid)
 	current := root
 	for _, segment := range strings.Split(relative, string(os.PathSeparator)) {
 		if segment == "" || segment == "." || segment == ".." {
@@ -102,8 +104,8 @@ func ensureDirectoryTreeJournaled(
 		isDestination := current == directory
 		expectedMode := os.FileMode(0)
 		createMode := os.FileMode(0755)
-		expectedUID := 0
-		expectedGID := 0
+		expectedUID := rootUID
+		expectedGID := rootGID
 		if isDestination {
 			expectedMode = mode
 			createMode = mode
