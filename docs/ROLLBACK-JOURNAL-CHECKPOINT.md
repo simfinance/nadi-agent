@@ -61,7 +61,8 @@ The helper must create the journal before the first reversible filesystem mutati
 - [ ] Define the recovery behavior for broker mapping/drop-in writes after Central enrollment. Those writes occur after the irreversible enrollment boundary; Agent state must be preserved and local rollback must not imply Central enrollment was undone.
 - [ ] Add fault-injection tests at every mutation boundary, including process interruption between intent, filesystem mutation, fingerprint persistence, rollback deletion, and journal update.
 - [ ] Verify behavior on supported Linux filesystems and systemd hosts, including directory fsync and ownership behavior.
-- [ ] Run the complete CI workflow on the final branch head, then add root/non-root/systemd end-to-end coverage.
+- [x] Go validation workflow #329 (`45332623960`) passed on code commit `7126fe4de8eb479645f02a617baef92ff4b0f143`: gofmt, `go test ./...`, `go test -race ./...`, `go vet ./...`, Linux AMD64, and Linux ARM64.
+- [ ] Add root/non-root/systemd end-to-end coverage on a disposable Linux host.
 - [ ] Confirm the Bridge adapter handles `rolled_back`, `recovery_required`, and retained committed-journal responses without prompting for a new token.
 
 The current implementation is an integrated first increment for the reversible fresh-install filesystem phase only. It does not make account creation reversible, does not roll back Central enrollment, and does not yet make RESTORE or the complete three-operation lifecycle transactionally recoverable.
