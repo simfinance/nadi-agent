@@ -66,6 +66,9 @@ func newProvisionJournal(path string) (*provisionJournalStore, provisionJournal,
 	if metadata.Mode()&os.ModeSymlink != 0 || !metadata.IsDir() {
 		return nil, provisionJournal{}, errors.New("provisioning journal parent must be a real directory")
 	}
+	if err := validateProvisionJournalParent(path, uint32(os.Geteuid()), uint32(os.Getegid())); err != nil {
+		return nil, provisionJournal{}, err
+	}
 
 	if _, err := os.Lstat(path); err == nil {
 		return nil, provisionJournal{}, errors.New("a provisioning journal already exists; recovery is required")
@@ -110,6 +113,9 @@ func openProvisionJournal(path string) (*provisionJournalStore, provisionJournal
 		path:     path,
 		ownerUID: uint32(os.Geteuid()),
 		ownerGID: uint32(os.Getegid()),
+	}
+	if err := validateProvisionJournalParent(path, store.ownerUID, store.ownerGID); err != nil {
+		return nil, provisionJournal{}, err
 	}
 	journal, err := store.Load()
 	if err != nil {
@@ -186,8 +192,29 @@ func (s *provisionJournalStore) Load() (provisionJournal, error) {
 	return journal, nil
 }
 
+func validateProvisionJournalParent(path string, ownerUID uint32, ownerGID uint32) error {
+	parent := filepath.Dir(path)
+	if err := ensureNoSymlinkPath(parent); err != nil {
+		return fmt.Errorf("provisioning journal parent path is unsafe: %w", err)
+	}
+
+	metadata, err := os.Lstat(parent)
+	if err != nil {
+		return fmt.Errorf("inspect provisioning journal parent: %w", err)
+	}
+	stat, ok := metadata.Sys().(*syscall.Stat_t)
+	if !ok || stat.Uid != ownerUID || stat.Gid != ownerGID || metadata.Mode().Perm()&0022 != 0 {
+		return errors.New("provisioning journal parent ownership or permissions are unsafe")
+	}
+
+	return nil
+}
+
 func (s *provisionJournalStore) Save(journal provisionJournal) error {
 	if err := validateProvisionJournal(journal); err != nil {
+		return err
+	}
+	if err := validateProvisionJournalParent(s.path, s.ownerUID, s.ownerGID); err != nil {
 		return err
 	}
 
@@ -281,16 +308,19 @@ func validateProvisionJournal(journal provisionJournal) error {
 	}
 
 	for _, action := range journal.Actions {
-		if (action.Kind != "file" && action.Kind != "directory") ||
-			!filepath.IsAbs(action.Target) ||
-			filepath.Clean(action.Target) != action.Target ||
-			(action.State != "intent" && action.State != "applied" && action.State != "rolled_back") {
+		validTarget := filepath.IsAbs(action.Target) && filepath.Clean(action.Target) == action.Target
+		if action.Kind == "account" {
+			validTarget = action.Target == "nadi-agent"
+		}
+		if (action.Kind != "file" && action.Kind != "directory" && action.Kind != "account") ||
+			!validTarget ||
+			(action.State != "intent" && action.State != "applied" && action.State != "retained" && action.State != "rolled_back") {
 			return errors.New("provisioning journal contains an invalid action")
 		}
 
 		if action.State == "applied" {
-			if action.Fingerprint == nil {
-				return errors.New("applied provisioning journal action has no fingerprint")
+			if action.Fingerprint == nil || action.Kind == "account" {
+				return errors.New("applied provisioning journal action has no valid resource fingerprint")
 			}
 			if action.Kind == "file" && len(action.Fingerprint.SHA256) != 64 {
 				return errors.New("provisioning journal file fingerprint is incomplete")
@@ -301,6 +331,9 @@ func validateProvisionJournal(journal provisionJournal) error {
 		} else if action.Fingerprint != nil {
 			return errors.New("unapplied provisioning journal action must not have a fingerprint")
 		}
+		if action.State == "retained" && action.Kind != "account" {
+			return errors.New("only the fixed service account may be retained by this journal version")
+		}
 	}
 
 	return nil
@@ -310,9 +343,11 @@ func (s *provisionJournalStore) AddIntent(journal *provisionJournal, kind string
 	if journal == nil {
 		return -1, errors.New("provisioning journal is required")
 	}
-	if (kind != "file" && kind != "directory") ||
-		!filepath.IsAbs(target) ||
-		filepath.Clean(target) != target {
+	validTarget := filepath.IsAbs(target) && filepath.Clean(target) == target
+	if kind == "account" {
+		validTarget = target == "nadi-agent"
+	}
+	if (kind != "file" && kind != "directory" && kind != "account") || !validTarget {
 		return -1, errors.New("provisioning journal action target is invalid")
 	}
 
@@ -376,6 +411,9 @@ func (s *provisionJournalStore) MarkApplied(journal *provisionJournal, index int
 	}
 
 	action := &journal.Actions[index]
+	if action.State != "intent" || (action.Kind != "file" && action.Kind != "directory") {
+		return errors.New("only an intended file or directory action can be marked applied")
+	}
 	fingerprint, err := fingerprintProvisionResource(action.Kind, action.Target)
 	if err != nil {
 		return fmt.Errorf("fingerprint provisioned %s %s: %w", action.Kind, action.Target, err)
@@ -451,8 +489,18 @@ func (s *provisionJournalStore) Rollback(journal *provisionJournal, allowedRoots
 
 	for index := len(journal.Actions) - 1; index >= 0; index-- {
 		action := &journal.Actions[index]
-		if action.State == "rolled_back" {
+		if action.State == "rolled_back" || action.State == "retained" {
 			continue
+		}
+		if action.State == "intent" && action.Kind != "account" {
+			if _, err := os.Lstat(action.Target); errors.Is(err, os.ErrNotExist) {
+				action.State = "rolled_back"
+				journal.UpdatedAt = time.Now().UTC()
+				if err := s.Save(*journal); err != nil {
+					return fmt.Errorf("persist absent intent rollback at action %d: %w", index, err)
+				}
+				continue
+			}
 		}
 		if action.State != "applied" || action.Fingerprint == nil {
 			return fmt.Errorf("recovery required: action %d has no verified post-operation fingerprint", index)
@@ -525,7 +573,7 @@ func (s *provisionJournalStore) Commit(journal *provisionJournal) error {
 		return errors.New("provisioning journal is required")
 	}
 	for _, action := range journal.Actions {
-		if action.State != "applied" {
+		if action.State != "applied" && action.State != "retained" && action.State != "rolled_back" {
 			return errors.New("cannot commit a provisioning journal with incomplete actions")
 		}
 	}
