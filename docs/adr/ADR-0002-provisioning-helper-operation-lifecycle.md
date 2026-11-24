@@ -1,6 +1,6 @@
 # ADR-0002: Fixed Provisioning Helper Operation Lifecycle
 
-- Status: Proposed — awaiting explicit approval
+- Status: Accepted
 - Date: 2026-11-24
 - Owners: NADI Agent and Laravel Bridge maintainers
 - Scope: Agent/Bridge installer protocol only
@@ -119,6 +119,9 @@ Costs:
 - Requires coordinated changes in Agent helper, Bridge adapter, tests, docs, and rollback handling.
 - Requires explicit non-secret transaction metadata for safe phase transitions.
 
-## Approval gate
+## Approval record
 
-This ADR is a proposal only. Do not merge, release, or install the helper based on this proposal until the project owner explicitly approves it. Until then, the installer remains fail-closed and the current combined helper prototype is not production-ready.
+- Approved by the project owner in the NADI project conversation on 2026-11-24.
+- Approval scope: implement the three fixed internal operations consistently across Agent and Laravel Bridge.
+- Customer-facing installation remains exactly two commands: `composer require nadi/laravel-agent` followed by `php artisan nadi:install`.
+- This approval does not waive the remaining implementation, rollback, trusted packaging, integration-test, or release gates. The helper must remain unavailable to production until those gates pass.
