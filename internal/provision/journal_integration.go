@@ -19,6 +19,8 @@ var provisionJournalRollbackRoots = []string{
 	"/var/lib/nadi",
 	"/var/log/nadi",
 	"/run/nadi",
+	"/var/lib/nadi-bridge",
+	"/etc/systemd",
 }
 
 const provisionLockPath = "/etc/.nadi-provisioning.lock"
