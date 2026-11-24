@@ -159,3 +159,21 @@ func TestInstallImmutableFileJournaledRollsBackCreatedFile(t *testing.T) {
 		t.Fatalf("created file remains after rollback: %v", err)
 	}
 }
+
+
+func TestProvisionLockRejectsConcurrentOperation(t *testing.T) {
+    directory := t.TempDir()
+    path := filepath.Join(directory, "provision.lock")
+
+    unlock, err := acquireProvisionLockAt(path)
+    if err != nil {
+        t.Fatalf("acquire first provisioning lock: %v", err)
+    }
+    defer unlock()
+
+    secondUnlock, err := acquireProvisionLockAt(path)
+    if err == nil {
+        secondUnlock()
+        t.Fatal("second provisioning operation must not acquire an already-held lock")
+    }
+}
