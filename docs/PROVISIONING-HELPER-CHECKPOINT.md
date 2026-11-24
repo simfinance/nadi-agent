@@ -343,3 +343,41 @@ These are release blockers, not reasons to weaken the two-command customer exper
 - [x] The Bridge token callback is invoked only after `install_agent` confirms a fresh installation; the token and serialized stdin buffers are zeroed after use.
 - [x] Before service activation, the helper verifies the Agent state file metadata without reading its contents and checks the presence/ownership/mode of the fixed Agent, key, systemd, broker mapping, and drop-in assets.
 - [x] Agent unit tests, race tests, vet, AMD64 build, and ARM64 build all completed successfully in workflow #269 as recorded above.
+
+
+## Existing Agent identity RESTORE implementation checkpoint — 2026-11-24
+
+The Master Architecture RESTORE path has an initial source implementation on the Agent branch. It is deliberately fail-closed and does not create a new Agent identity when an existing installation is detected.
+
+Implemented:
+
+- [x] Added bounded read-only state loading in `internal/state.LoadReadOnly`. It does not acquire the Agent service lock, create directories, rewrite state, or change hostname. It validates the canonical state directory, owner/mode, regular non-symlink state file, file owner/mode/size, opened-file identity, schema version, and non-empty `agent_instance_id`.
+- [x] Added `identity.VerifyReadOnly` to compare the persisted machine fingerprint with the current server and require a registered Agent identity, Central Agent ID, Central Server ID, and 1–20 enrolled applications.
+- [x] Added the fixed Agent CLI operation `--verify-existing-identity-summary-stdout`. It emits only the existing non-secret enrollment identity summary; it does not emit Agent or application credentials and does not perform monitoring or Control Poll.
+- [x] The helper invokes that operation as the dedicated non-root `nadi-agent` account. The root helper does not read `state.json` contents.
+- [x] The helper RESTORE path verifies the existing state file and service account, checks that the installed Agent binary exactly matches the signed release artifact SHA-256, runs the Agent-side read-only identity verifier, reconciles the existing enrolled application keys against the supplied local inventory, and restores the fixed Bridge broker mapping/drop-in and root-owned provisioning metadata.
+- [x] Root-owned completion metadata now binds `agent_instance_id`, Central `agent_id`, and `server_id`. Existing enrollment recovery and `start_agent` re-verify those identifiers and compare the installed broker mapping and systemd drop-in with the Agent-side summary before service activation.
+- [x] If a prior completion record exists but Agent state is missing, or if the persisted identity, machine fingerprint, binary digest, application inventory, broker mapping, or completion identity cannot be verified, the helper fails closed with `recovery_required`/unknown outcome. It does not silently create a new identity or submit a new enrollment token.
+- [x] Added tests for read-only state ownership/mode and symlink rejection, existing identity verification and machine mismatch, full enrollment-summary compatibility, and root-owned identity summary decoding.
+
+### Validation
+
+- Agent workflow #297, run ID `45326354185`, passed on source/test commit `b3d9ef04c4f55dd7c0120dde9576e68680768cd8`: gofmt, `go test ./...`, `go test -race ./...`, `go vet ./...`, Linux AMD64 build, and Linux ARM64 build.
+- Workflow: https://github.com/simfinance/nadi-agent/actions/runs/45326354185.
+
+### Remaining RESTORE and release limitations
+
+- [ ] The RESTORE verifier checks file ownership/mode, bounded structure, schema, server machine fingerprint, enrollment status, Central identity, application inventory, and root-owned completion binding. A cryptographic integrity/MAC scheme for the entire credential-bearing state document has not been specified or implemented; do not claim full cryptographic state tamper detection.
+- [ ] RESTORE currently requires the installed Agent binary to match the signed staged release artifact byte-for-byte. It does not implement an in-place binary upgrade or replacement when the staged release digest differs. A separate approved update/rollback lifecycle is required for that case.
+- [ ] The canonical state path discrepancy remains unresolved: current StateStore uses `/var/lib/nadi/state.json`, while ADR-0001 describes `/var/lib/nadi/state/`. No migration was performed.
+- [ ] Root/non-root and live systemd integration tests, interrupted restore tests, full rollback journal, trusted helper packaging/bootstrap and exact sudoers validation, Bridge per-application environment provisioning, and full Central/Agent/Broker/Bridge end-to-end tests remain outstanding.
+- [ ] Existing enrollment-attempt metadata without a verified completion record continues to fail closed as an unknown Central outcome. Do not retry enrollment automatically.
+
+The implementation preserves the customer-facing two-command flow:
+
+```bash
+composer require nadi/laravel-agent
+php artisan nadi:install
+```
+
+No Central source or production host was modified. The helper remains source code and is not yet a production-installed trusted OS helper.
