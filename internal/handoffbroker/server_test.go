@@ -126,7 +126,7 @@ func TestValidateConfigRejectsCredentialPathOutsideApplication(t *testing.T) {
 				RuntimeUID:          33,
 				RuntimeGID:          33,
 				CredentialFile:      "/etc/nadi-agent/credential",
-				ActivationStateFile: "/run/nadi-agent/bridge-state/00000000-0000-4000-8000-000000000001.json",
+				ActivationStateFile: "/run/nadi/bridge-state/00000000-0000-4000-8000-000000000001.json",
 			},
 		},
 	}
@@ -144,7 +144,7 @@ func TestValidateConfigRejectsDuplicateApplicationMappings(t *testing.T) {
 		RuntimeUID:          33,
 		RuntimeGID:          33,
 		CredentialFile:      "/var/lib/nadi-bridge/00000000-0000-4000-8000-000000000001/credential",
-		ActivationStateFile: "/run/nadi-agent/bridge-state/00000000-0000-4000-8000-000000000001.json",
+		ActivationStateFile: "/run/nadi/bridge-state/00000000-0000-4000-8000-000000000001.json",
 	}
 
 	config := Config{
@@ -172,7 +172,7 @@ func TestValidateConfigAcceptsPerApplicationRuntimeMapping(t *testing.T) {
 				RuntimeUID:          33,
 				RuntimeGID:          33,
 				CredentialFile:      "/var/lib/nadi-bridge/00000000-0000-4000-8000-000000000001/credential",
-				ActivationStateFile: "/run/nadi-agent/bridge-state/00000000-0000-4000-8000-000000000001.json",
+				ActivationStateFile: "/run/nadi/bridge-state/00000000-0000-4000-8000-000000000001.json",
 			},
 		},
 	}
@@ -245,7 +245,7 @@ func TestHandleConnectionRejectsUnexpectedPeerUID(t *testing.T) {
 				RuntimeUID:          33,
 				RuntimeGID:          33,
 				CredentialFile:      "/var/lib/nadi-bridge/00000000-0000-4000-8000-000000000001/credential",
-				ActivationStateFile: "/run/nadi-agent/bridge-state/00000000-0000-4000-8000-000000000001.json",
+				ActivationStateFile: "/run/nadi/bridge-state/00000000-0000-4000-8000-000000000001.json",
 			},
 		},
 	}
@@ -297,7 +297,7 @@ func TestValidateConfigRejectsCredentialPathInsideWritableApplicationTree(t *tes
 				RuntimeUID:          33,
 				RuntimeGID:          33,
 				CredentialFile:      "/srv/www/app/storage/app/private/nadi/credential",
-				ActivationStateFile: "/run/nadi-agent/bridge-state/00000000-0000-4000-8000-000000000001.json",
+				ActivationStateFile: "/run/nadi/bridge-state/00000000-0000-4000-8000-000000000001.json",
 			},
 		},
 	}
@@ -320,7 +320,7 @@ func TestValidateConfigAcceptsRootOwnedExternalCredentialDirectory(t *testing.T)
 				RuntimeUID:          33,
 				RuntimeGID:          33,
 				CredentialFile:      "/var/lib/nadi-bridge/00000000-0000-4000-8000-000000000001/credential",
-				ActivationStateFile: "/run/nadi-agent/bridge-state/00000000-0000-4000-8000-000000000001.json",
+				ActivationStateFile: "/run/nadi/bridge-state/00000000-0000-4000-8000-000000000001.json",
 			},
 		},
 	}
@@ -338,7 +338,7 @@ func TestValidateConfigRejectsDuplicateRuntimeUIDs(t *testing.T) {
 		RuntimeUID:          33,
 		RuntimeGID:          33,
 		CredentialFile:      "/var/lib/nadi-bridge/00000000-0000-4000-8000-000000000001/credential",
-		ActivationStateFile: "/run/nadi-agent/bridge-state/00000000-0000-4000-8000-000000000001.json",
+		ActivationStateFile: "/run/nadi/bridge-state/00000000-0000-4000-8000-000000000001.json",
 	}
 	second := Mapping{
 		ApplicationID:       "00000000-0000-4000-8000-000000000002",
@@ -347,7 +347,7 @@ func TestValidateConfigRejectsDuplicateRuntimeUIDs(t *testing.T) {
 		RuntimeUID:          33,
 		RuntimeGID:          33,
 		CredentialFile:      "/var/lib/nadi-bridge/00000000-0000-4000-8000-000000000002/credential",
-		ActivationStateFile: "/run/nadi-agent/bridge-state/00000000-0000-4000-8000-000000000002.json",
+		ActivationStateFile: "/run/nadi/bridge-state/00000000-0000-4000-8000-000000000002.json",
 	}
 
 	config := Config{
