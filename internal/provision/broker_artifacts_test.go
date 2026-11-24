@@ -34,12 +34,18 @@ func TestBuildBrokerArtifactsReconcilesEveryApplication(t *testing.T) {
 		ServerID:         "central-server",
 		Applications: []enrollmentSummaryApplication{
 			{
-				ApplicationID:  "00000000-0000-4000-8000-000000000002",
-				ApplicationKey: "app-two",
+				ApplicationID:   "00000000-0000-4000-8000-000000000002",
+				ApplicationKey:  "app-two",
+				ApplicationName: "Application Two",
+				Environment:     "staging",
+				RegistrationID:  "registration-two",
 			},
 			{
-				ApplicationID:  "00000000-0000-4000-8000-000000000001",
-				ApplicationKey: "app-one",
+				ApplicationID:   "00000000-0000-4000-8000-000000000001",
+				ApplicationKey:  "app-one",
+				ApplicationName: "Application One",
+				Environment:     "production",
+				RegistrationID:  "registration-one",
 			},
 		},
 	}
