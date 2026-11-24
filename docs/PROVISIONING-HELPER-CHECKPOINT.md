@@ -142,3 +142,29 @@ This must be resolved as an explicit architecture/path decision before completin
 - [ ] End-to-end tests across Central, Agent, Bridge, and broker.
 
 No Central changes are required for the confirmed one-Agent/many-applications enrollment model. No monitoring has been activated, and no production host has been modified.
+
+
+## CI validation confirmation — 2026-11-24
+
+The validation rerun for Agent commit `e69151c4b9e5a605f9e28417e48ea4bd7d150d0f` has completed successfully.
+
+Workflow run #198: https://github.com/simfinance/nadi-agent/actions/runs/45301631835
+
+Both jobs completed with success:
+- [x] Go formatting job.
+- [x] `gofmt` verification.
+- [x] `go test ./...`.
+- [x] `go test -race ./...`.
+- [x] `go vet ./...`.
+- [x] Linux AMD64 build.
+- [x] Linux ARM64 build.
+
+This supersedes the earlier "CI pending" statements above for the atomic broker artifact installer increment. The validation applies to the exact Agent commit listed above; documentation-only updates after that commit do not change the validated Go source. It does not establish root-helper completion, deployment readiness, or an end-to-end Central/Agent/Bridge test.
+
+## Additional integration gap confirmed during Bridge review
+
+The Bridge `PrivilegedProvisioner::installAgent()` currently treats every non-zero helper exit as a generic provisioning failure before decoding stdout. That response path cannot yet distinguish a failure before Central enrollment from a failure after Central has consumed the one-time token. The future helper/Bridge contract must return and validate a bounded, non-secret partial-outcome envelope even when the helper exits non-zero, without exposing credentials or state.json. Do not retry enrollment automatically after an uncertain or confirmed Central registration.
+
+The Bridge config still defaults `credential_file` to Laravel's `storage/app/private/nadi/credential`, while the broker accepts only `/var/lib/nadi-bridge/{application_id}/credential`. This remains an explicit Bridge runtime integration gap and must be fixed together with tests for application-ID validation and path derivation; changing only the config default would be insufficient.
+
+The architecture path alignment blocker remains unresolved. Root provisioning orchestration must not be completed against either path family until the project owner resolves the Master Architecture section 10.4 versus Agent-specific path decision.
