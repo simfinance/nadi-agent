@@ -674,7 +674,7 @@ func runAgentEnrollment(manifestPath string, token []byte, identity helperRuntim
 
 	tokenInput := make([]byte, len(token)+1)
 	copy(tokenInput, token)
-	tokenInput[len(tokenInput)-1] = '\\n'
+	tokenInput[len(tokenInput)-1] = '\n'
 	command.Stdin = bytes.NewReader(tokenInput)
 
 	var stdout boundedBuffer
