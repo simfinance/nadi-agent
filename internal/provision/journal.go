@@ -457,13 +457,51 @@ func fingerprintProvisionResource(kind string, path string) (provisionJournalFin
 
 	switch kind {
 	case "file":
-		if !metadata.Mode().IsRegular() {
-			return provisionJournalFingerprint{}, errors.New("journaled file is not regular")
+		if !metadata.Mode().IsRegular() || metadata.Size() < 0 || metadata.Size() > maximumArtifactBytes {
+			return provisionJournalFingerprint{}, errors.New("journaled file is not regular or exceeds the size limit")
 		}
-		content, err := os.ReadFile(path)
+
+		file, err := os.Open(path)
 		if err != nil {
 			return provisionJournalFingerprint{}, err
 		}
+		defer file.Close()
+
+		openedMetadata, err := file.Stat()
+		if err != nil {
+			return provisionJournalFingerprint{}, err
+		}
+		openedStat, ok := openedMetadata.Sys().(*syscall.Stat_t)
+		if !ok ||
+			openedStat.Dev != stat.Dev ||
+			openedStat.Ino != stat.Ino ||
+			openedStat.Uid != stat.Uid ||
+			openedStat.Gid != stat.Gid ||
+			!openedMetadata.Mode().IsRegular() {
+			return provisionJournalFingerprint{}, errors.New("journaled file changed during fingerprint inspection")
+		}
+
+		content, err := io.ReadAll(io.LimitReader(file, maximumArtifactBytes+1))
+		if err != nil {
+			return provisionJournalFingerprint{}, err
+		}
+		if int64(len(content)) != openedMetadata.Size() || int64(len(content)) > maximumArtifactBytes {
+			return provisionJournalFingerprint{}, errors.New("journaled file changed size during fingerprint inspection")
+		}
+
+		finalMetadata, err := file.Stat()
+		if err != nil {
+			return provisionJournalFingerprint{}, err
+		}
+		finalStat, ok := finalMetadata.Sys().(*syscall.Stat_t)
+		if !ok ||
+			finalStat.Dev != openedStat.Dev ||
+			finalStat.Ino != openedStat.Ino ||
+			finalMetadata.Size() != openedMetadata.Size() ||
+			!finalMetadata.ModTime().Equal(openedMetadata.ModTime()) {
+			return provisionJournalFingerprint{}, errors.New("journaled file changed while its fingerprint was calculated")
+		}
+
 		digest := sha256.Sum256(content)
 		fingerprint.SHA256 = hex.EncodeToString(digest[:])
 	case "directory":
@@ -480,6 +518,9 @@ func fingerprintProvisionResource(kind string, path string) (provisionJournalFin
 func (s *provisionJournalStore) Rollback(journal *provisionJournal, allowedRoots []string) error {
 	if journal == nil {
 		return errors.New("provisioning journal is required")
+	}
+	if journal.Phase != "in_progress" && journal.Phase != "rollback_required" {
+		return errors.New("provisioning journal is not in a rollback-eligible phase")
 	}
 	journal.Phase = "rollback_required"
 	journal.UpdatedAt = time.Now().UTC()
@@ -571,6 +612,9 @@ func removeProvisionJournalResource(action provisionJournalAction) error {
 func (s *provisionJournalStore) Commit(journal *provisionJournal) error {
 	if journal == nil {
 		return errors.New("provisioning journal is required")
+	}
+	if journal.Phase != "in_progress" {
+		return errors.New("only an in-progress provisioning journal can be committed")
 	}
 	for _, action := range journal.Actions {
 		if action.State != "applied" && action.State != "retained" && action.State != "rolled_back" {
