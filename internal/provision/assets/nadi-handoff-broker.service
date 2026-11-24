@@ -8,7 +8,7 @@ Before=nadi-agent.service
 Type=simple
 User=root
 Group=root
-ExecStart=/opt/nadi/bin/nadi-agent --handoff-broker --broker-config /etc/nadi-agent/bridge-mappings.json --broker-socket /run/nadi-agent/credential-handoff.sock
+ExecStart=/opt/nadi/bin/nadi-agent --handoff-broker --broker-config /etc/nadi/bridge-mappings.json --broker-socket /run/nadi/credential-handoff.sock
 Restart=on-failure
 RestartSec=5s
 UMask=0077
@@ -22,7 +22,7 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 LockPersonality=true
 RestrictSUIDSGID=true
-ReadWritePaths=/run/nadi-agent
+ReadWritePaths=/run/nadi
 CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER
 AmbientCapabilities=
 
