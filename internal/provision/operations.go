@@ -218,148 +218,246 @@ func RunPrivileged(reader io.Reader, writer io.Writer, errorWriter io.Writer) in
 }
 
 func runInstallAgentOperation(request ProvisionOperationRequest, response HelperResponse, writer io.Writer, errorWriter io.Writer) int {
-	response.ApplicationCount = len(request.Applications)
-	response.Phase = "release_verification"
+    response.ApplicationCount = len(request.Applications)
+    response.Phase = "release_verification"
 
-	releaseManifestJSON, err := base64.StdEncoding.Strict().DecodeString(request.Release.ManifestBase64)
-	if err != nil || len(releaseManifestJSON) == 0 || len(releaseManifestJSON) > maximumManifestBytes {
-		return writeOperationFailure(writer, errorWriter, response, errors.New("signed release manifest is invalid or too large"))
-	}
+    releaseManifestJSON, err := base64.StdEncoding.Strict().DecodeString(request.Release.ManifestBase64)
+    if err != nil || len(releaseManifestJSON) == 0 || len(releaseManifestJSON) > maximumManifestBytes {
+        return writeOperationFailure(writer, errorWriter, response, errors.New("signed release manifest is invalid or too large"))
+    }
 
-	releaseManifest, err := VerifySignedRelease(releaseManifestJSON, request.Release.SignatureBase64)
-	if err != nil {
-		return writeOperationFailure(writer, errorWriter, response, err)
-	}
-	artifact, err := SelectReleaseArtifact(releaseManifest, runtime.GOARCH)
-	if err != nil {
-		return writeOperationFailure(writer, errorWriter, response, err)
-	}
-	if filepath.Base(request.Release.ArtifactPath) != artifact.Filename {
-		return writeOperationFailure(writer, errorWriter, response, errors.New("staged Agent artifact filename does not match the signed release manifest"))
-	}
+    releaseManifest, err := VerifySignedRelease(releaseManifestJSON, request.Release.SignatureBase64)
+    if err != nil {
+        return writeOperationFailure(writer, errorWriter, response, err)
+    }
+    artifact, err := SelectReleaseArtifact(releaseManifest, runtime.GOARCH)
+    if err != nil {
+        return writeOperationFailure(writer, errorWriter, response, err)
+    }
+    if filepath.Base(request.Release.ArtifactPath) != artifact.Filename {
+        return writeOperationFailure(writer, errorWriter, response, errors.New("staged Agent artifact filename does not match the signed release manifest"))
+    }
 
-	legacyRequest := ProvisionRequest{
-		Release: ProvisionReleaseRequest{
-			ArtifactPath: request.Release.ArtifactPath,
-		},
-		Applications: request.Applications,
-	}
-	if err := validateApplicationTargets(legacyRequest); err != nil {
-		return writeOperationFailure(writer, errorWriter, response, err)
-	}
-	if err := validateStagedArtifactOwner(legacyRequest); err != nil {
-		return writeOperationFailure(writer, errorWriter, response, err)
-	}
-	if err := VerifyReleaseArtifact(request.Release.ArtifactPath, artifact); err != nil {
-		return writeOperationFailure(writer, errorWriter, response, err)
-	}
-	attemptExists, attemptErr := hasProvisionEnrollmentAttempt()
-	if attemptErr != nil {
-		response.Phase = "existing_installation"
-		response.EnrollmentStatus = "unknown"
-		response.RetrySafe = false
-		return writeOperationFailure(writer, errorWriter, response, errors.New("enrollment attempt metadata cannot be safely inspected"))
-	}
-	if attemptExists {
-		inventory, inventoryErr := readProvisionInventory()
-		completion, completionErr := readProvisionCompletion()
-		if inventoryErr == nil && completionErr == nil &&
-			inventory.AgentVersion == releaseManifest.Version &&
-			inventory.ArtifactSHA256 == artifact.SHA256 &&
-			sameApplicationInventory(inventory.Applications, request.Applications) &&
-			completion.AgentVersion == inventory.AgentVersion &&
-			completion.ApplicationCount == len(inventory.Applications) {
-			if err := verifyExistingEnrollmentIdentity(request.Applications, inventory.ArtifactSHA256, completion); err == nil {
-				response.Success = true
-				response.Phase = "enrolled"
-				response.EnrollmentStatus = "registered"
-				response.RetrySafe = false
-				response.AgentVersion = completion.AgentVersion
-				response.ApplicationCount = completion.ApplicationCount
-				response.Message = "Existing NADI installation and Agent identity are verified; continue with the remaining lifecycle operation."
-				writeHelperResponse(writer, response)
-				return 0
-			}
-		}
-		response.Phase = "existing_installation"
-		response.EnrollmentStatus = "unknown"
-		response.RetrySafe = false
-		return writeOperationFailure(writer, errorWriter, response, errors.New("an enrollment attempt exists without a matching verified completion record; reconcile before retrying"))
-	}
-	if _, stateErr := os.Lstat(agentStateFile); stateErr == nil {
-		response.Phase = "identity_restore"
-		response.EnrollmentStatus = "unknown"
-		response.RetrySafe = false
+    legacyRequest := ProvisionRequest{
+        Release: ProvisionReleaseRequest{
+            ArtifactPath: request.Release.ArtifactPath,
+        },
+        Applications: request.Applications,
+    }
+    if err := validateApplicationTargets(legacyRequest); err != nil {
+        return writeOperationFailure(writer, errorWriter, response, err)
+    }
+    if err := validateStagedArtifactOwner(legacyRequest); err != nil {
+        return writeOperationFailure(writer, errorWriter, response, err)
+    }
+    if err := VerifyReleaseArtifact(request.Release.ArtifactPath, artifact); err != nil {
+        return writeOperationFailure(writer, errorWriter, response, err)
+    }
 
-		if err := restoreExistingAgentIdentity(request, releaseManifest.Version, artifact.SHA256); err != nil {
-			response.Phase = "recovery_required"
-			return writeOperationFailure(writer, errorWriter, response, fmt.Errorf("existing Agent identity could not be safely restored: %w", err))
-		}
+    alreadyInstalled, err := recoverProvisionJournalForInstall(
+        releaseManifest.Version,
+        artifact.SHA256,
+        request.Applications,
+    )
+    if err != nil {
+        response.Phase = "recovery_required"
+        response.EnrollmentStatus = "unknown"
+        response.RetrySafe = false
+        return writeOperationFailure(writer, errorWriter, response, err)
+    }
+    if alreadyInstalled {
+        response.Success = true
+        response.Phase = "installed"
+        response.EnrollmentStatus = "not_started"
+        response.RetrySafe = true
+        response.AgentVersion = releaseManifest.Version
+        response.Message = "The previous installation transaction was already committed and its inventory matches this request."
+        writeHelperResponse(writer, response)
+        return 0
+    }
 
-		response.Success = true
-		response.Phase = "enrolled"
-		response.EnrollmentStatus = "registered"
-		response.RetrySafe = false
-		response.AgentVersion = releaseManifest.Version
-		response.Message = "Existing NADI Agent identity was verified on this server and restored without a new enrollment."
-		writeHelperResponse(writer, response)
-		return 0
-	} else if !errors.Is(stateErr, os.ErrNotExist) {
-		response.Phase = "recovery_required"
-		response.EnrollmentStatus = "unknown"
-		response.RetrySafe = false
-		return writeOperationFailure(writer, errorWriter, response, errors.New("existing Agent state cannot be safely inspected"))
-	}
+    attemptExists, attemptErr := hasProvisionEnrollmentAttempt()
+    if attemptErr != nil {
+        response.Phase = "existing_installation"
+        response.EnrollmentStatus = "unknown"
+        response.RetrySafe = false
+        return writeOperationFailure(writer, errorWriter, response, errors.New("enrollment attempt metadata cannot be safely inspected"))
+    }
+    if attemptExists {
+        inventory, inventoryErr := readProvisionInventory()
+        completion, completionErr := readProvisionCompletion()
+        if inventoryErr == nil && completionErr == nil &&
+            inventory.AgentVersion == releaseManifest.Version &&
+            inventory.ArtifactSHA256 == artifact.SHA256 &&
+            sameApplicationInventory(inventory.Applications, request.Applications) &&
+            completion.AgentVersion == inventory.AgentVersion &&
+            completion.ApplicationCount == len(inventory.Applications) {
+            if err := verifyExistingEnrollmentIdentity(request.Applications, inventory.ArtifactSHA256, completion); err == nil {
+                response.Success = true
+                response.Phase = "enrolled"
+                response.EnrollmentStatus = "registered"
+                response.RetrySafe = false
+                response.AgentVersion = completion.AgentVersion
+                response.ApplicationCount = completion.ApplicationCount
+                response.Message = "Existing NADI installation and Agent identity are verified; continue with the remaining lifecycle operation."
+                writeHelperResponse(writer, response)
+                return 0
+            }
+        }
+        response.Phase = "existing_installation"
+        response.EnrollmentStatus = "unknown"
+        response.RetrySafe = false
+        return writeOperationFailure(writer, errorWriter, response, errors.New("an enrollment attempt exists without a matching verified completion record; reconcile before retrying"))
+    }
 
-	if _, completionErr := os.Lstat(provisionCompletePath); completionErr == nil {
-		response.Phase = "recovery_required"
-		response.EnrollmentStatus = "unknown"
-		response.RetrySafe = false
-		return writeOperationFailure(writer, errorWriter, response, errors.New("a prior enrollment completion record exists but Agent state is missing; restore or reconcile identity before any new enrollment"))
-	} else if !errors.Is(completionErr, os.ErrNotExist) {
-		response.Phase = "recovery_required"
-		response.EnrollmentStatus = "unknown"
-		response.RetrySafe = false
-		return writeOperationFailure(writer, errorWriter, response, errors.New("prior enrollment completion metadata cannot be safely inspected"))
-	}
+    if _, stateErr := os.Lstat(agentStateFile); stateErr == nil {
+        response.Phase = "identity_restore"
+        response.EnrollmentStatus = "unknown"
+        response.RetrySafe = false
 
-	response.Phase = "os_provisioning"
-	identity, err := ensureAgentAccount()
-	if err != nil {
-		return writeOperationFailure(writer, errorWriter, response, err)
-	}
-	if err := prepareAgentDirectories(identity); err != nil {
-		return writeOperationFailure(writer, errorWriter, response, err)
-	}
-	if err := installAgentAssets(request.Release.ArtifactPath, artifact.SHA256); err != nil {
-		return writeOperationFailure(writer, errorWriter, response, err)
-	}
+        if err := restoreExistingAgentIdentity(request, releaseManifest.Version, artifact.SHA256); err != nil {
+            response.Phase = "recovery_required"
+            return writeOperationFailure(writer, errorWriter, response, fmt.Errorf("existing Agent identity could not be safely restored: %w", err))
+        }
 
-	inventory := provisionInventory{
-		ProtocolVersion: 1,
-		AgentVersion:    releaseManifest.Version,
-		ArtifactSHA256:  artifact.SHA256,
-		Applications:    request.Applications,
-	}
-	inventoryJSON, err := json.Marshal(inventory)
-	if err != nil {
-		return writeOperationFailure(writer, errorWriter, response, errors.New("encode root-owned provisioning inventory"))
-	}
-	if err := installImmutableFile(provisionInventoryPath, inventoryJSON, 0600, 0, 0); err != nil {
-		return writeOperationFailure(writer, errorWriter, response, fmt.Errorf("install root-owned provisioning inventory: %w", err))
-	}
-	if _, err := runTrustedCommand("/usr/bin/systemctl", "daemon-reload"); err != nil {
-		return writeOperationFailure(writer, errorWriter, response, fmt.Errorf("reload systemd units: %w", err))
-	}
+        response.Success = true
+        response.Phase = "enrolled"
+        response.EnrollmentStatus = "registered"
+        response.RetrySafe = false
+        response.AgentVersion = releaseManifest.Version
+        response.Message = "Existing NADI Agent identity was verified on this server and restored without a new enrollment."
+        writeHelperResponse(writer, response)
+        return 0
+    } else if !errors.Is(stateErr, os.ErrNotExist) {
+        response.Phase = "recovery_required"
+        response.EnrollmentStatus = "unknown"
+        response.RetrySafe = false
+        return writeOperationFailure(writer, errorWriter, response, errors.New("existing Agent state cannot be safely inspected"))
+    }
 
-	response.Success = true
-	response.Phase = "installed"
-	response.EnrollmentStatus = "not_started"
-	response.RetrySafe = true
-	response.AgentVersion = releaseManifest.Version
-	response.Message = "NADI Agent assets and validated application inventory installed; enrollment has not started."
-	writeHelperResponse(writer, response)
-	return 0
+    if _, completionErr := os.Lstat(provisionCompletePath); completionErr == nil {
+        response.Phase = "recovery_required"
+        response.EnrollmentStatus = "unknown"
+        response.RetrySafe = false
+        return writeOperationFailure(writer, errorWriter, response, errors.New("a prior enrollment completion record exists but Agent state is missing; restore or reconcile identity before any new enrollment"))
+    } else if !errors.Is(completionErr, os.ErrNotExist) {
+        response.Phase = "recovery_required"
+        response.EnrollmentStatus = "unknown"
+        response.RetrySafe = false
+        return writeOperationFailure(writer, errorWriter, response, errors.New("prior enrollment completion metadata cannot be safely inspected"))
+    }
+
+    store, journal, err := newProvisionJournal(provisionJournalPath)
+    if err != nil {
+        response.Phase = "recovery_required"
+        response.EnrollmentStatus = "not_started"
+        response.RetrySafe = false
+        return writeOperationFailure(writer, errorWriter, response, fmt.Errorf("start provisioning transaction journal: %w", err))
+    }
+
+    rollbackFailure := func(cause error) int {
+        if rollbackErr := store.Rollback(&journal, provisionJournalRollbackRoots); rollbackErr != nil {
+            response.Phase = "recovery_required"
+            response.EnrollmentStatus = "not_started"
+            response.RetrySafe = false
+            return writeOperationFailure(
+                writer,
+                errorWriter,
+                response,
+                fmt.Errorf("provisioning failed: %v; rollback requires manual recovery: %w", cause, rollbackErr),
+            )
+        }
+        if removeErr := removeProvisionJournal(store, "rolled_back"); removeErr != nil {
+            response.Phase = "recovery_required"
+            response.EnrollmentStatus = "not_started"
+            response.RetrySafe = false
+            return writeOperationFailure(
+                writer,
+                errorWriter,
+                response,
+                fmt.Errorf("provisioning resources were rolled back but the journal could not be removed: %w", removeErr),
+            )
+        }
+
+        response.Phase = "rolled_back"
+        response.EnrollmentStatus = "not_started"
+        response.RetrySafe = true
+        return writeOperationFailure(
+            writer,
+            errorWriter,
+            response,
+            fmt.Errorf("provisioning failed; transaction-created files and directories were rolled back; the fixed nadi-agent account is intentionally retained: %w", cause),
+        )
+    }
+
+    response.Phase = "os_provisioning"
+
+    accountAction, err := store.AddIntent(&journal, "account", "nadi-agent")
+    if err != nil {
+        return rollbackFailure(fmt.Errorf("record fixed Agent account intent: %w", err))
+    }
+    identity, err := ensureAgentAccount()
+    if err != nil {
+        return rollbackFailure(fmt.Errorf("verify or create fixed Agent account: %w", err))
+    }
+    if err := store.MarkRetained(&journal, accountAction); err != nil {
+        return rollbackFailure(fmt.Errorf("record retained fixed Agent account: %w", err))
+    }
+
+    if err := prepareAgentDirectoriesJournaled(identity, store, &journal); err != nil {
+        return rollbackFailure(err)
+    }
+    if err := installAgentAssetsJournaled(request.Release.ArtifactPath, artifact.SHA256, store, &journal); err != nil {
+        return rollbackFailure(err)
+    }
+
+    inventory := provisionInventory{
+        ProtocolVersion: 1,
+        AgentVersion:    releaseManifest.Version,
+        ArtifactSHA256:  artifact.SHA256,
+        Applications:    request.Applications,
+    }
+    inventoryJSON, err := json.Marshal(inventory)
+    if err != nil {
+        return rollbackFailure(errors.New("encode root-owned provisioning inventory"))
+    }
+    if err := installImmutableFileJournaled(
+        provisionInventoryPath,
+        inventoryJSON,
+        0600,
+        0,
+        0,
+        store,
+        &journal,
+    ); err != nil {
+        return rollbackFailure(fmt.Errorf("install root-owned provisioning inventory: %w", err))
+    }
+
+    if _, err := runTrustedCommand("/usr/bin/systemctl", "daemon-reload"); err != nil {
+        return rollbackFailure(fmt.Errorf("reload systemd units: %w", err))
+    }
+
+    if err := store.Commit(&journal); err != nil {
+        return rollbackFailure(fmt.Errorf("commit provisioning transaction journal: %w", err))
+    }
+    if err := removeProvisionJournal(store, "committed"); err != nil {
+        response.Phase = "installed"
+        response.EnrollmentStatus = "not_started"
+        response.RetrySafe = true
+        response.AgentVersion = releaseManifest.Version
+        response.Message = "Installation completed and committed; the committed journal is retained for safe recovery on the next invocation."
+        writeHelperResponse(writer, response)
+        return 0
+    }
+
+    response.Success = true
+    response.Phase = "installed"
+    response.EnrollmentStatus = "not_started"
+    response.RetrySafe = true
+    response.AgentVersion = releaseManifest.Version
+    response.Message = "NADI Agent assets and validated application inventory installed; enrollment has not started. The transaction journal was committed and removed."
+    writeHelperResponse(writer, response)
+    return 0
 }
 
 func decodeEnrollmentIdentitySummary(summaryJSON []byte) (provisionCompletion, error) {
