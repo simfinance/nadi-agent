@@ -1,6 +1,6 @@
 # Provisioning Rollback Journal — Implementation Checkpoint
 
-Status: journal core, fresh-install (`install_agent`) integration, and exclusive helper-operation locking are implemented in the current branch. Restore, Bridge artifact reconciliation after enrollment, failure-injection coverage, and full E2E validation remain pending. This is not a production-ready rollback implementation.
+Status: journal core, fresh-install (`install_agent`) integration, and exclusive helper-operation locking are implemented in the current branch. Agent-mediated identity RESTORE is also implemented as a fail-closed source path, but its metadata writes are not yet journaled. Bridge artifact reconciliation after enrollment, failure-injection coverage, crash/reboot recovery, and full E2E validation remain pending. This is not a production-ready rollback implementation.
 
 ## Safety contract
 
@@ -37,9 +37,18 @@ An intent without a post-operation fingerprint is ambiguous. The helper must pre
 - Existing resources are never recorded as transaction-created resources.
 - Enrollment and any Central-side effects are outside local rollback. Once enrollment may have been submitted, preserve Agent state and require identity reconciliation instead of rollback or re-enrollment.
 
-## Integration still required
+## Initial integration requirements — current status
 
-The helper must create the journal before the first reversible filesystem mutation, then instrument directory and file creation in `install_agent`, broker artifact installation, and relevant restore paths. It must commit only after the installed inventory and all required local assets pass verification. Failure handling must run rollback and return a non-secret bounded status. A stale or malformed journal must block another install attempt until explicitly reconciled.
+The fresh-install `install_agent` path now creates the journal before its first journaled account/filesystem action, records transaction-created directory and file mutations, commits after inventory installation and systemd daemon reload, and invokes reverse-order rollback on pre-enrollment failure.
+
+The following integration is still required:
+
+- Extend transaction tracking to the identity RESTORE metadata path. RESTORE must never roll back, rewrite, or delete the existing Agent state or credentials.
+- Define safe recovery for broker mapping, per-application credential-directory, and systemd drop-in writes after Central enrollment. These are post-enrollment local mutations; failure must preserve Agent state and must never imply Central enrollment was undone.
+- Add failure injection at every mutation boundary and crash/reboot recovery tests.
+- Ensure the Bridge adapter handles `rolled_back` and `recovery_required` as explicit bounded outcomes without prompting for another enrollment token.
+
+A stale or malformed journal must block another install attempt until explicitly reconciled.
 
 ## Current implementation increment
 
