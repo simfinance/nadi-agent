@@ -68,70 +68,58 @@ func Ensure(store *state.Store) (state.State, error) {
 	return current, nil
 }
 
-func Verify(store *state.Store) (state.State, error)
-{
+func Verify(store *state.Store) (state.State, error) {
     current, err := store.Load();
-    if err != nil
-    {
+    if err != nil {
         return state.State{}, fmt.Errorf("load persisted Agent identity: %w", err);
     }
 
     fingerprint, err := machineFingerprint();
-    if err != nil
-    {
+    if err != nil {
         return state.State{}, err;
     }
 
-    if current.MachineFingerprint == "" || current.MachineFingerprint != fingerprint
-    {
+    if current.MachineFingerprint == "" || current.MachineFingerprint != fingerprint {
         return state.State{}, ErrMachineIdentityChanged;
     }
 
     if current.EnrollmentStatus != "registered" ||
         current.AgentInstanceID == "" ||
         current.CentralAgentID == "" ||
-        current.CentralServerID == ""
-    {
+        current.CentralServerID == "" {
         return state.State{}, errors.New("persisted Agent enrollment identity is incomplete");
     }
 
-    if len(current.Applications) < 1 || len(current.Applications) > 20
-    {
+    if len(current.Applications) < 1 || len(current.Applications) > 20 {
         return state.State{}, errors.New("persisted Agent application identity count is invalid");
     }
 
     return current, nil;
 }
 
-func VerifyReadOnly(directory string) (state.State, error)
-{
+func VerifyReadOnly(directory string) (state.State, error) {
     current, err := state.LoadReadOnly(directory);
-    if err != nil
-    {
+    if err != nil {
         return state.State{}, fmt.Errorf("load persisted Agent identity: %w", err);
     }
 
     fingerprint, err := machineFingerprint();
-    if err != nil
-    {
+    if err != nil {
         return state.State{}, err;
     }
 
-    if current.MachineFingerprint == "" || current.MachineFingerprint != fingerprint
-    {
+    if current.MachineFingerprint == "" || current.MachineFingerprint != fingerprint {
         return state.State{}, ErrMachineIdentityChanged;
     }
 
     if current.EnrollmentStatus != "registered" ||
         current.AgentInstanceID == "" ||
         current.CentralAgentID == "" ||
-        current.CentralServerID == ""
-    {
+        current.CentralServerID == "" {
         return state.State{}, errors.New("persisted Agent enrollment identity is incomplete");
     }
 
-    if len(current.Applications) < 1 || len(current.Applications) > 20
-    {
+    if len(current.Applications) < 1 || len(current.Applications) > 20 {
         return state.State{}, errors.New("persisted Agent application identity count is invalid");
     }
 
