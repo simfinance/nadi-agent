@@ -433,6 +433,10 @@ func (s *provisionJournalStore) MarkApplied(journal *provisionJournal, index int
 }
 
 func fingerprintProvisionResource(kind string, path string) (provisionJournalFingerprint, error) {
+	if err := ensureNoSymlinkPath(filepath.Dir(path)); err != nil {
+		return provisionJournalFingerprint{}, fmt.Errorf("journal resource parent path is unsafe: %w", err)
+	}
+
 	metadata, err := os.Lstat(path)
 	if err != nil {
 		return provisionJournalFingerprint{}, err
