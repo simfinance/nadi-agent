@@ -44,7 +44,7 @@ The fresh-install `install_agent` path now creates the journal before its first 
 The following integration is still required:
 
 - Extend the same journal discipline to broker mapping, per-application credential-directory, and systemd drop-in writes performed by the fresh `enroll_agent` operation after Central registration. A failure must preserve Agent state and must never imply Central enrollment was undone.
-- Add failure injection at every mutation boundary and crash/reboot recovery tests.
+- Add failure injection at every mutation boundary and crash/reboot recovery tests. Two restart-oriented journal tests now reload the persisted RESTORE journal: a fingerprinted file is removed safely, while an intent without a persisted fingerprint remains untouched and leaves the journal in `rollback_required`.
 - Ensure the Bridge adapter handles `rolled_back` and `recovery_required` as explicit bounded outcomes without prompting for another enrollment token.
 
 A stale or malformed journal must block another install attempt until explicitly reconciled.
@@ -68,9 +68,11 @@ A stale or malformed journal must block another install attempt until explicitly
 - [x] Extend transaction tracking to identity RESTORE metadata, canonical directories, missing signed assets, broker mapping/drop-in artifacts, and completion metadata. The existing Agent state and credentials are excluded from the journal and are never modified by rollback.
 - [ ] Extend transaction tracking to broker mapping/drop-in writes performed by `enroll_agent` after Central registration. Preserve Agent state and report a non-retryable partial outcome if local reconciliation fails.
 - [ ] Add fault-injection tests at every mutation boundary, including process interruption between intent, filesystem mutation, fingerprint persistence, rollback deletion, and journal update.
+- [x] Add focused persisted-journal reload tests for an applied RESTORE file and an ambiguous intent; the former rolls back by fingerprint and the latter is preserved fail-closed.
 - [ ] Verify behavior on supported Linux filesystems and systemd hosts, including directory fsync and ownership behavior.
-- [x] Go validation workflow #329 (`45332623960`) passed on code commit `7126fe4de8eb479645f02a617baef92ff4b0f143`: gofmt, `go test ./...`, `go test -race ./...`, `go vet ./...`, Linux AMD64, and Linux ARM64.
+- [x] Go validation workflow #343 (`45335032195`) passed on commit `5c8491f2d0ace650a2376e0ce3ec0c041ed3e867`: gofmt, `go test ./...`, `go test -race ./...`, `go vet ./...`, Linux AMD64, and Linux ARM64.
+- [ ] Re-run Go validation for the latest RESTORE recovery tests at commit `80bbc389942f72f4ea6f4ebcdd9dfb0fa8ce218e`; no workflow run was visible when this checkpoint was updated.
 - [ ] Add root/non-root/systemd end-to-end coverage on a disposable Linux host.
 - [ ] Confirm the Bridge adapter handles `rolled_back`, `recovery_required`, and retained committed-journal responses without prompting for a new token.
 
-The current implementation provides journal coverage for the fresh-install filesystem phase and the local filesystem mutations performed by identity RESTORE. RESTORE preserves the existing Agent state and credentials, and rollback is limited to fingerprint-matching resources created by that RESTORE transaction. It does not make account creation reversible, does not reverse the systemd daemon-reload operation, does not roll back Central enrollment, and does not make the complete three-operation lifecycle transactionally recoverable. The RESTORE path and its new immutable-file tests remain unvalidated by CI until the current GitHub Actions run is approved and completed.
+The current implementation provides journal coverage for the fresh-install filesystem phase and the local filesystem mutations performed by identity RESTORE. RESTORE preserves the existing Agent state and credentials, and rollback is limited to fingerprint-matching resources created by that RESTORE transaction. It does not make account creation reversible, does not reverse the systemd daemon-reload operation, does not roll back Central enrollment, and does not make the complete three-operation lifecycle transactionally recoverable. The immutable-file RESTORE changes passed Go validation workflow #343. The additional persisted-journal reload tests were added afterward and still require CI validation at the latest branch head.
