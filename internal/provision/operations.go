@@ -566,17 +566,37 @@ func restoreExistingAgentIdentity(
 		return err
 	}
 
-	if err := installAgentAssets(request.Release.ArtifactPath, artifactSHA256); err != nil {
-		return fmt.Errorf("restore signed Agent assets without replacing existing files: %w", err)
+	store, journal, err := newProvisionJournalForOperation(provisionJournalPath, "restore_agent")
+	if err != nil {
+		return fmt.Errorf("start identity restore transaction journal: %w", err)
+	}
+
+	rollbackFailure := func(cause error) error {
+		if rollbackErr := store.Rollback(&journal, provisionJournalRollbackRoots); rollbackErr != nil {
+			return fmt.Errorf("identity restore failed: %v; transaction rollback requires manual recovery: %w", cause, rollbackErr)
+		}
+		if removeErr := removeProvisionJournal(store, "rolled_back"); removeErr != nil {
+			return fmt.Errorf("identity restore failed: %v; rollback completed but its journal could not be removed: %w", cause, removeErr)
+		}
+		return cause
+	}
+
+	if err := installAgentAssetsJournaled(
+		request.Release.ArtifactPath,
+		artifactSHA256,
+		store,
+		&journal,
+	); err != nil {
+		return rollbackFailure(fmt.Errorf("restore signed Agent assets without replacing existing files: %w", err))
 	}
 
 	if err := verifyInstalledAgentBinaryDigest(artifactSHA256); err != nil {
-		return err
+		return rollbackFailure(err)
 	}
 
 	summaryJSON, err := runAgentIdentityVerification(identity)
 	if err != nil {
-		return err
+		return rollbackFailure(err)
 	}
 
 	legacyRequest := ProvisionRequest{
@@ -589,11 +609,17 @@ func restoreExistingAgentIdentity(
 		summaryJSON,
 	)
 	if err != nil {
-		return fmt.Errorf("reconcile persisted Agent identity with the requested application inventory: %w", err)
+		return rollbackFailure(fmt.Errorf("reconcile persisted Agent identity with the requested application inventory: %w", err))
 	}
 
-	if err := InstallBrokerArtifacts(brokerConfig, mappingJSON, dropIn); err != nil {
-		return fmt.Errorf("restore Bridge broker artifacts: %w", err)
+	if err := installBrokerArtifactsJournaled(
+		brokerConfig,
+		mappingJSON,
+		dropIn,
+		store,
+		&journal,
+	); err != nil {
+		return rollbackFailure(fmt.Errorf("restore Bridge broker artifacts: %w", err))
 	}
 
 	inventory := provisionInventory{
@@ -604,40 +630,62 @@ func restoreExistingAgentIdentity(
 	}
 	inventoryJSON, err := json.Marshal(inventory)
 	if err != nil {
-		return errors.New("encode restored provisioning inventory")
+		return rollbackFailure(errors.New("encode restored provisioning inventory"))
 	}
-	if err := installImmutableFile(provisionInventoryPath, inventoryJSON, 0600, 0, 0); err != nil {
-		return fmt.Errorf("persist restored provisioning inventory: %w", err)
+	if err := installImmutableFileJournaled(
+		provisionInventoryPath,
+		inventoryJSON,
+		0600,
+		0,
+		0,
+		store,
+		&journal,
+	); err != nil {
+		return rollbackFailure(fmt.Errorf("persist restored provisioning inventory: %w", err))
 	}
 
 	identityRecord, err := decodeEnrollmentIdentitySummary(summaryJSON)
 	if err != nil {
-		return fmt.Errorf("verify restored Agent identity summary: %w", err)
+		return rollbackFailure(fmt.Errorf("verify restored Agent identity summary: %w", err))
 	}
 	completion := provisionCompletion{
 		ProtocolVersion:  1,
-		AgentVersion:     releaseVersion,
+		AgentVersion:    releaseVersion,
 		ApplicationCount: len(request.Applications),
 		EnrollmentStatus: "registered",
-		AgentInstanceID:  identityRecord.AgentInstanceID,
+		AgentInstanceID: identityRecord.AgentInstanceID,
 		AgentID:          identityRecord.AgentID,
 		ServerID:         identityRecord.ServerID,
 	}
 	completionJSON, err := json.Marshal(completion)
 	if err != nil {
-		return errors.New("encode restored provisioning completion record")
+		return rollbackFailure(errors.New("encode restored provisioning completion record"))
 	}
-	if err := installImmutableFile(provisionCompletePath, completionJSON, 0600, 0, 0); err != nil {
-		return fmt.Errorf("persist restored provisioning completion record: %w", err)
+	if err := installImmutableFileJournaled(
+		provisionCompletePath,
+		completionJSON,
+		0600,
+		0,
+		0,
+		store,
+		&journal,
+	); err != nil {
+		return rollbackFailure(fmt.Errorf("persist restored provisioning completion record: %w", err))
 	}
 
 	if _, err := runTrustedCommand("/usr/bin/systemctl", "daemon-reload"); err != nil {
-		return fmt.Errorf("reload systemd units after identity restore: %w", err)
+		return rollbackFailure(fmt.Errorf("reload systemd units after identity restore: %w", err))
+	}
+
+	if err := store.Commit(&journal); err != nil {
+		return rollbackFailure(fmt.Errorf("commit identity restore transaction journal: %w", err))
+	}
+	if err := removeProvisionJournal(store, "committed"); err != nil {
+		return fmt.Errorf("identity restore committed successfully but its journal is retained for safe recovery: %w", err)
 	}
 
 	return nil
 }
-
 func verifyInstalledAgentBinaryDigest(expectedSHA256 string) error {
 	content, err := readRootOwnedRegularFile(agentBinaryPath, maximumArtifactBytes)
 	if err != nil {
