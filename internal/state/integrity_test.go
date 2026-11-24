@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,12 +25,9 @@ func TestStoreRejectsModifiedPersistedState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	modified := append([]byte(nil), content...)
-	for index := range modified {
-		if modified[index] == 'a' {
-			modified[index] = 'b'
-			break
-		}
+	modified := bytes.Replace(content, []byte("agent-integrity-test"), []byte("agent-tampered-test"), 1)
+	if bytes.Equal(modified, content) {
+		t.Fatal("test fixture did not contain the expected state value")
 	}
 	if err := os.WriteFile(path, modified, 0600); err != nil {
 		t.Fatal(err)
@@ -75,7 +73,10 @@ func TestLoadReadOnlyRejectsModifiedPersistedState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	content = append(content, []byte(" ")...)
+	content = bytes.Replace(content, []byte("agent-integrity-test"), []byte("agent-tampered-test"), 1)
+	if bytes.Equal(content, nil) {
+		t.Fatal("test fixture unexpectedly became empty")
+	}
 	if err := os.WriteFile(path, content, 0600); err != nil {
 		t.Fatal(err)
 	}
