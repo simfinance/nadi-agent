@@ -37,6 +37,7 @@ type ProvisionOperationRequest struct {
 type provisionInventory struct {
 	ProtocolVersion int                    `json:"protocol_version"`
 	AgentVersion    string                 `json:"agent_version"`
+	ArtifactSHA256  string                 `json:"artifact_sha256"`
 	Applications    []ProvisionApplication `json:"applications"`
 }
 
@@ -258,6 +259,7 @@ func runInstallAgentOperation(request ProvisionOperationRequest, response Helper
 		completion, completionErr := readProvisionCompletion()
 		if inventoryErr == nil && completionErr == nil &&
 			inventory.AgentVersion == releaseManifest.Version &&
+			inventory.ArtifactSHA256 == artifact.SHA256 &&
 			sameApplicationInventory(inventory.Applications, request.Applications) &&
 			completion.AgentVersion == inventory.AgentVersion &&
 			completion.ApplicationCount == len(inventory.Applications) {
@@ -297,7 +299,8 @@ func runInstallAgentOperation(request ProvisionOperationRequest, response Helper
 	inventory := provisionInventory{
 		ProtocolVersion: 1,
 		AgentVersion:    releaseManifest.Version,
-		Applications:    request.Applications,
+		ArtifactSHA256: artifact.SHA256,
+		Applications:   request.Applications,
 	}
 	inventoryJSON, err := json.Marshal(inventory)
 	if err != nil {
@@ -607,10 +610,19 @@ func readProvisionInventory() (provisionInventory, error) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&inventory); err != nil || ensureJSONEOF(decoder) != nil ||
 		inventory.ProtocolVersion != 1 || inventory.AgentVersion == "" ||
+		!validSHA256Digest(inventory.ArtifactSHA256) ||
 		len(inventory.Applications) < 1 || len(inventory.Applications) > 20 {
 		return provisionInventory{}, errors.New("root-owned provisioning inventory is invalid")
 	}
 	return inventory, nil
+}
+
+func validSHA256Digest(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }
 
 func hasProvisionEnrollmentAttempt() (bool, error) {
