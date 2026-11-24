@@ -153,6 +153,148 @@ func installBrokerArtifactsAt(
 	return nil
 }
 
+func installBrokerArtifactsJournaled(
+	config handoffbroker.Config,
+	mappingJSON []byte,
+	dropIn string,
+	store *provisionJournalStore,
+	journal *provisionJournal,
+) error {
+	if os.Geteuid() != 0 {
+		return errors.New("broker artifact installation requires root")
+	}
+
+	return installBrokerArtifactsJournaledAt(
+		string(os.PathSeparator),
+		config,
+		mappingJSON,
+		dropIn,
+		0,
+		0,
+		store,
+		journal,
+	)
+}
+
+func installBrokerArtifactsJournaledAt(
+	root string,
+	config handoffbroker.Config,
+	mappingJSON []byte,
+	dropIn string,
+	ownerUID int,
+	ownerGID int,
+	store *provisionJournalStore,
+	journal *provisionJournal,
+) error {
+	if root == "" || !filepath.IsAbs(root) || filepath.Clean(root) != root {
+		return errors.New("artifact installation root must be absolute and canonical")
+	}
+	if store == nil || journal == nil || journal.Operation != "restore_agent" {
+		return errors.New("identity restore journal is required for broker artifact installation")
+	}
+
+	expectedMapping, err := encodeBrokerMapping(config)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(mappingJSON, expectedMapping) {
+		return errors.New("broker mapping bytes do not match the validated configuration")
+	}
+
+	expectedDropIn, err := BuildBrokerDropIn(config)
+	if err != nil {
+		return err
+	}
+	if dropIn != expectedDropIn {
+		return errors.New("systemd drop-in does not match the validated broker configuration")
+	}
+
+	bridgeRoot := filepath.Join(root, "var", "lib", "nadi-bridge")
+	if err := ensureDirectoryTreeJournaled(
+		root,
+		bridgeRoot,
+		bridgeDirectoryMode,
+		ownerUID,
+		ownerGID,
+		store,
+		journal,
+	); err != nil {
+		return fmt.Errorf("prepare Bridge credential root: %w", err)
+	}
+
+	for _, application := range config.Applications {
+		credentialDirectory := filepath.Join(bridgeRoot, application.ApplicationID)
+		if err := ensureDirectoryTreeJournaled(
+			root,
+			credentialDirectory,
+			bridgeDirectoryMode,
+			ownerUID,
+			ownerGID,
+			store,
+			journal,
+		); err != nil {
+			return fmt.Errorf("prepare application credential directory: %w", err)
+		}
+	}
+
+	mappingPath := filepath.Join(root, "etc", "nadi", "bridge-mappings.json")
+	if err := ensureDirectoryTreeJournaled(
+		root,
+		filepath.Dir(mappingPath),
+		nadiConfigDirectoryMode,
+		ownerUID,
+		ownerGID,
+		store,
+		journal,
+	); err != nil {
+		return fmt.Errorf("prepare broker mapping directory: %w", err)
+	}
+	if err := installImmutableFileJournaled(
+		mappingPath,
+		mappingJSON,
+		brokerMappingFileMode,
+		ownerUID,
+		ownerGID,
+		store,
+		journal,
+	); err != nil {
+		return fmt.Errorf("install broker mapping: %w", err)
+	}
+
+	dropInPath := filepath.Join(
+		root,
+		"etc",
+		"systemd",
+		"system",
+		"nadi-handoff-broker.service.d",
+		"bridge-credentials.conf",
+	)
+	if err := ensureDirectoryTreeJournaled(
+		root,
+		filepath.Dir(dropInPath),
+		systemDirectoryMode,
+		ownerUID,
+		ownerGID,
+		store,
+		journal,
+	); err != nil {
+		return fmt.Errorf("prepare broker systemd drop-in directory: %w", err)
+	}
+	if err := installImmutableFileJournaled(
+		dropInPath,
+		[]byte(dropIn),
+		brokerDropInFileMode,
+		ownerUID,
+		ownerGID,
+		store,
+		journal,
+	); err != nil {
+		return fmt.Errorf("install broker systemd drop-in: %w", err)
+	}
+
+	return nil
+}
+
 func encodeBrokerMapping(config handoffbroker.Config) ([]byte, error) {
 	if _, err := handoffbroker.NewServer(
 		"/run/nadi/credential-handoff.sock",
