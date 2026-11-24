@@ -308,6 +308,18 @@ func runInstallAgentOperation(request ProvisionOperationRequest, response Helper
 		return writeOperationFailure(writer, errorWriter, response, errors.New("existing Agent state cannot be safely inspected"))
 	}
 
+	if _, completionErr := os.Lstat(provisionCompletePath); completionErr == nil {
+		response.Phase = "recovery_required"
+		response.EnrollmentStatus = "unknown"
+		response.RetrySafe = false
+		return writeOperationFailure(writer, errorWriter, response, errors.New("a prior enrollment completion record exists but Agent state is missing; restore or reconcile identity before any new enrollment"))
+	} else if !errors.Is(completionErr, os.ErrNotExist) {
+		response.Phase = "recovery_required"
+		response.EnrollmentStatus = "unknown"
+		response.RetrySafe = false
+		return writeOperationFailure(writer, errorWriter, response, errors.New("prior enrollment completion metadata cannot be safely inspected"))
+	}
+
 	response.Phase = "os_provisioning"
 	identity, err := ensureAgentAccount()
 	if err != nil {
@@ -549,13 +561,19 @@ func runEnrollAgentOperation(request ProvisionOperationRequest, response HelperR
 			response.RetrySafe = false
 			return writeOperationFailure(writer, errorWriter, response, errors.New("enrollment completion record does not match the installed inventory"))
 		}
+		if err := verifyExistingEnrollmentIdentity(inventory.Applications, inventory.ArtifactSHA256); err != nil {
+			response.Phase = "recovery_required"
+			response.EnrollmentStatus = "unknown"
+			response.RetrySafe = false
+			return writeOperationFailure(writer, errorWriter, response, fmt.Errorf("existing enrollment identity could not be verified: %w", err))
+		}
 		response.Success = true
 		response.Phase = "enrolled"
 		response.EnrollmentStatus = "registered"
 		response.RetrySafe = false
 		response.AgentVersion = completion.AgentVersion
 		response.ApplicationCount = completion.ApplicationCount
-		response.Message = "NADI Agent enrollment and broker configuration were already completed."
+		response.Message = "NADI Agent enrollment and broker configuration were already completed and the persisted identity is verified."
 		writeHelperResponse(writer, response)
 		return 0
 	}
