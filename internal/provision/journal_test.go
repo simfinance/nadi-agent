@@ -33,6 +33,58 @@ func TestProvisionJournalRecordsAndReloadsIntent(t *testing.T) {
 	}
 }
 
+func TestIdentityRestoreJournalRollsBackOnlyNewMetadataAndPreservesAgentState(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "provisioning-journal.json")
+	statePath := filepath.Join(directory, "state.json")
+	metadataPath := filepath.Join(directory, "provisioning-complete.json")
+
+	if err := os.WriteFile(statePath, []byte("existing Agent identity"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	store, journal, err := newProvisionJournalForOperation(journalPath, "restore_agent")
+	if err != nil {
+		t.Fatalf("create identity restore journal: %v", err)
+	}
+	if journal.Operation != "restore_agent" {
+		t.Fatalf("unexpected journal operation %q", journal.Operation)
+	}
+
+	index, err := store.AddIntent(&journal, "file", metadataPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(metadataPath, []byte("new non-secret completion metadata"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkApplied(&journal, index); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Rollback(&journal, []string{directory}); err != nil {
+		t.Fatalf("rollback identity restore metadata: %v", err)
+	}
+
+	if _, err := os.Lstat(metadataPath); !os.IsNotExist(err) {
+		t.Fatalf("new completion metadata was not rolled back: %v", err)
+	}
+	state, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("existing Agent state was removed: %v", err)
+	}
+	if string(state) != "existing Agent identity" {
+		t.Fatalf("existing Agent state was modified: %q", state)
+	}
+}
+
+func TestProvisionJournalRejectsUnknownOperation(t *testing.T) {
+	_, _, err := newProvisionJournalForOperation(filepath.Join(t.TempDir(), "journal.json"), "enroll_agent")
+	if err == nil {
+		t.Fatal("journal must reject operations outside the internal install/restore transaction allowlist")
+	}
+}
+
 func TestProvisionJournalRollbackRemovesOnlyMatchingCreatedFile(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "provisioning-journal.json")
