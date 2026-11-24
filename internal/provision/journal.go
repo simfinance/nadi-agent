@@ -540,7 +540,7 @@ func provisionJournalTargetAllowed(target string, allowedRoots []string) bool {
 			continue
 		}
 		relative, err := filepath.Rel(root, target)
-		if err == nil && relative != "." && relative != ".." &&
+		if err == nil && relative != ".." &&
 			!strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
 			return true
 		}
