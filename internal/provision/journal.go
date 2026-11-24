@@ -55,6 +55,13 @@ type provisionJournalStore struct {
 }
 
 func newProvisionJournal(path string) (*provisionJournalStore, provisionJournal, error) {
+	return newProvisionJournalForOperation(path, "install_agent")
+}
+
+func newProvisionJournalForOperation(path string, operation string) (*provisionJournalStore, provisionJournal, error) {
+	if operation != "install_agent" && operation != "restore_agent" {
+		return nil, provisionJournal{}, errors.New("unsupported provisioning journal operation")
+	}
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return nil, provisionJournal{}, errors.New("provisioning journal path must be absolute and canonical")
 	}
@@ -85,7 +92,7 @@ func newProvisionJournal(path string) (*provisionJournalStore, provisionJournal,
 	journal := provisionJournal{
 		ProtocolVersion: provisionJournalSchemaVersion,
 		TransactionID:   hex.EncodeToString(transactionIDBytes),
-		Operation:       "install_agent",
+		Operation:       operation,
 		Phase:           "in_progress",
 		CreatedAt:       now,
 		UpdatedAt:       now,
@@ -297,7 +304,7 @@ func (s *provisionJournalStore) Save(journal provisionJournal) error {
 func validateProvisionJournal(journal provisionJournal) error {
 	if journal.ProtocolVersion != provisionJournalSchemaVersion ||
 		len(journal.TransactionID) != 32 ||
-		journal.Operation != "install_agent" ||
+		(journal.Operation != "install_agent" && journal.Operation != "restore_agent") ||
 		(journal.Phase != "in_progress" &&
 			journal.Phase != "rollback_required" &&
 			journal.Phase != "rolled_back" &&
