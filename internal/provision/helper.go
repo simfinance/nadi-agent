@@ -339,22 +339,6 @@ func validateStagedArtifactOwner(request ProvisionRequest) error {
 	return nil
 }
 
-func rejectExistingAgentState() error {
-	metadata, err := os.Lstat(agentStateFile)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("inspect existing Agent state: %w", err)
-	}
-
-	if metadata.Mode()&os.ModeSymlink != 0 || !metadata.Mode().IsRegular() {
-		return errors.New("existing Agent state path is unsafe; automatic replacement is prohibited")
-	}
-
-	return errors.New("existing Agent state was found; use the identity-restore or repair workflow instead of a new enrollment")
-}
-
 func ensureAgentAccount() (helperRuntimeIdentity, error) {
 	group, err := user.LookupGroup(agentAccountName)
 	if err != nil {
