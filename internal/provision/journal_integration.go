@@ -133,7 +133,7 @@ func ensureDirectoryTreeJournaled(
 	}
 	rootStat, ok := rootMetadata.Sys().(*syscall.Stat_t)
 	if !ok || rootMetadata.Mode()&os.ModeSymlink != 0 || !rootMetadata.IsDir() ||
-		int(rootStat.Uid) != ownerUID || int(rootStat.Gid) != ownerGID ||
+		rootStat.Uid != uint32(os.Geteuid()) || rootStat.Gid != uint32(os.Getegid()) ||
 		rootMetadata.Mode().Perm()&0022 != 0 {
 		return errors.New("journaled directory root ownership or permissions are unsafe")
 	}
@@ -199,8 +199,10 @@ func ensureDirectoryTreeJournaled(
 			return fmt.Errorf("create directory %s: %w", current, err)
 		}
 
-		if err := os.Chown(current, expectedUID, expectedGID); err != nil {
-			return fmt.Errorf("set directory ownership for %s: %w", current, err)
+		if expectedUID != os.Geteuid() || expectedGID != os.Getegid() {
+			if err := os.Chown(current, expectedUID, expectedGID); err != nil {
+				return fmt.Errorf("set directory ownership for %s: %w", current, err)
+			}
 		}
 		if err := os.Chmod(current, createMode); err != nil {
 			return fmt.Errorf("set directory permissions for %s: %w", current, err)
