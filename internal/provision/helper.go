@@ -26,9 +26,9 @@ import (
 )
 
 const (
-	agentAccountName       = "nadi-agent"
-	agentBinaryPath        = "/opt/nadi/bin/nadi-agent"
-	agentStateDirectory    = "/var/lib/nadi"
+	agentAccountName        = "nadi-agent"
+	agentBinaryPath         = "/opt/nadi/bin/nadi-agent"
+	agentStateDirectory     = "/var/lib/nadi"
 	agentStateFile          = "/var/lib/nadi/state.json"
 	agentManifestPath       = "/etc/nadi/applications.json"
 	agentUnitPath           = "/etc/systemd/system/nadi-agent.service"
@@ -505,8 +505,8 @@ func runAgentEnrollment(manifestPath string, token string, identity helperRuntim
 	}
 	command.SysProcAttr = &syscall.SysProcAttr{
 		Credential: &syscall.Credential{
-			Uid: uint32(identity.uid),
-			Gid: uint32(identity.gid),
+			Uid:    uint32(identity.uid),
+			Gid:    uint32(identity.gid),
 			Groups: []uint32{uint32(identity.gid)},
 		},
 		Setpgid: true,
