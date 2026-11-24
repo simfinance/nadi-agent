@@ -179,7 +179,9 @@ func RunPrivileged(reader io.Reader, writer io.Writer, errorWriter io.Writer) in
 	response.EnrollmentStatus = "unknown"
 	response.RetrySafe = false
 
-	summaryJSON, err := runAgentEnrollment(manifestPath, request.Enrollment.Token, identity)
+	enrollmentToken := []byte(request.Enrollment.Token)
+	request.Enrollment.Token = ""
+	summaryJSON, err := runAgentEnrollment(manifestPath, enrollmentToken, identity)
 	if err != nil {
 		response.Message = "Agent enrollment outcome is uncertain. Preserve local state and do not retry with a new token."
 		writeHelperResponse(writer, response)
@@ -630,8 +632,14 @@ func writeEnrollmentManifest(content []byte, identity helperRuntimeIdentity) (st
 	return path, cleanup, nil
 }
 
-func runAgentEnrollment(manifestPath string, token string, identity helperRuntimeIdentity) ([]byte, error) {
-	if token == "" {
+func runAgentEnrollment(manifestPath string, token []byte, identity helperRuntimeIdentity) ([]byte, error) {
+	defer func() {
+		for index := range token {
+			token[index] = 0
+		}
+	}()
+
+	if len(token) == 0 {
 		return nil, errors.New("enrollment token is empty")
 	}
 
@@ -664,7 +672,9 @@ func runAgentEnrollment(manifestPath string, token string, identity helperRuntim
 		Setpgid: true,
 	}
 
-	tokenInput := []byte(token + "\n")
+	tokenInput := make([]byte, len(token)+1)
+	copy(tokenInput, token)
+	tokenInput[len(tokenInput)-1] = '\\n'
 	command.Stdin = bytes.NewReader(tokenInput)
 
 	var stdout boundedBuffer
