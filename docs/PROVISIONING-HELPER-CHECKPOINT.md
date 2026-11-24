@@ -259,3 +259,51 @@ The two-command requirement does not relax any security boundary: the Agent runt
 ADR-0002 is still **Proposed — awaiting explicit approval**. Its proposed internal separation (`install_agent`, `enroll_agent`, `start_agent`) must not be treated as an accepted protocol or wired into the release installer until explicitly approved and implemented consistently in Agent and Bridge. The user-facing two-command requirement is a UX constraint, not approval of ADR-0002.
 
 Outstanding release blockers remain: rollback journal, safe existing-Agent identity restore/repair, installer-managed Bridge identity provisioning, trusted OS helper packaging/bootstrap, root/non-root and systemd integration tests, and end-to-end validation. Central remains read-only; no production host has been modified.
+
+## Accepted three-operation helper lifecycle — 2026-11-24
+
+ADR-0002 was explicitly approved by the project owner on 2026-11-24. The approved contract is three fixed operations behind the same trusted helper invocation. This approval does not authorize production installation or waive release gates.
+
+Implemented source changes on the Agent branch:
+
+- [x] Replaced the exposed combined helper entrypoint with strict operation dispatch for `install_agent`, `enroll_agent`, and `start_agent`.
+- [x] Added operation-specific request validation. `install_agent` rejects enrollment fields; `enroll_agent` rejects release/application fields; `start_agent` accepts no caller-selected fields.
+- [x] `install_agent` verifies the signed release and artifact, validates the complete 1–20 application inventory and PHP-FPM identities, installs fixed assets, persists root-owned non-secret inventory metadata, and runs `systemctl daemon-reload`. It does not enroll or start services.
+- [x] `enroll_agent` accepts only the complete enrollment manifest and one-time token, validates the manifest against the installed inventory, runs the fixed Agent as `nadi-agent`, consumes only the non-secret summary, and installs broker mappings and exact write-path drop-ins.
+- [x] A root-owned non-secret enrollment-attempt marker is persisted before the Agent enrollment process starts. If a later invocation finds an attempt without a verified completion record, it fails closed as unknown/non-retryable; it does not submit another enrollment.
+- [x] `start_agent` accepts no arguments beyond the operation envelope, verifies the enrollment/broker completion record and Agent state file metadata without reading `state.json`, then starts only the fixed NADI broker and Agent units.
+- [x] Added Go request-decoder tests for operation-specific fields, unknown operations, and duplicate JSON keys.
+
+Bridge changes:
+
+- [x] The Bridge adapter now calls the same fixed helper invocation three times in order: `install_agent`, `enroll_agent`, then `start_agent`.
+- [x] The enrollment token is excluded from the install request and is sent only in the enroll request standard input. It is not added to argv or environment.
+- [x] Bridge response validation now recognizes the distinct `installed`, `enrolled`, and `completed` success phases and enforces their enrollment/retry invariants.
+- [x] Added PHPUnit coverage for install-only and enrollment-complete outcomes.
+- [x] Updated the Bridge privileged provisioning boundary to the accepted operation-specific protocol.
+
+The customer-facing installation invariant remains exactly two commands:
+
+```bash
+composer require nadi/laravel-agent
+php artisan nadi:install
+```
+
+All three helper operations are internal to the single Artisan installer execution. The infrastructure must still provide the trusted root-owned helper and exact narrow sudoers authorization; Composer does not install or replace the privileged helper.
+
+### Current validation status
+
+- Bridge workflow #62 (run ID 45323229422) passed PHP 8.2 and PHP 8.3 lint, PHPUnit, trust-anchor checks, bundled Agent binary verification, and Composer distribution checks: https://github.com/simfinance/nadi-laravel-agent/actions/runs/45323229422.
+- Agent workflow #251 (run ID 45323236586) is marked `action_required` by GitHub and exposed no jobs, so it has not validated the new Go operations. The previous workflow #239 passed only the earlier PHP-FPM hardening source, not this lifecycle implementation: https://github.com/simfinance/nadi-agent/actions/runs/45323236586.
+- Go formatting, unit/race tests, vet, and AMD64/ARM64 builds for the accepted lifecycle implementation remain unverified.
+
+### Remaining blockers
+
+- [ ] Obtain a runnable Agent CI validation for the new helper operation code and resolve any compile/test failures.
+- [ ] Add integration tests for root-owned inventory/attempt/completion metadata, enrollment interruption, and service activation sequencing.
+- [ ] Implement and test the pre-enrollment rollback journal.
+- [ ] Implement Master Architecture RESTORE behavior for an existing valid Agent identity; the current helper still fails closed when `state.json` exists and does not yet restore identity.
+- [ ] Complete trusted OS helper packaging/bootstrap and exact sudoers policy validation.
+- [ ] Complete root/non-root, systemd lifecycle, rollback, and end-to-end Central/Agent/Broker/Bridge tests.
+
+No Central source or production host was modified. The PR remains draft and the helper remains a source implementation, not a production-ready installer component.
