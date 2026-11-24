@@ -307,3 +307,28 @@ All three helper operations are internal to the single Artisan installer executi
 - [ ] Complete root/non-root, systemd lifecycle, rollback, and end-to-end Central/Agent/Broker/Bridge tests.
 
 No Central source or production host was modified. The PR remains draft and the helper remains a source implementation, not a production-ready installer component.
+
+## Master specification alignment review — 2026-11-24
+
+The uploaded Master Architecture Technical Specification v1.0 and Agent Side Monitoring Specification v1.0 were reopened and checked against the current helper implementation.
+
+Confirmed constraints preserved by this increment:
+
+- Developer-facing install flow remains exactly `composer require nadi/laravel-agent` followed by `php artisan nadi:install`.
+- Composer is not run as root and does not install or replace the privileged helper.
+- No manual Go, Python, Node.js, Agent binary, systemd unit, or Linux command installation is delegated to the application developer.
+- The Agent runtime remains the dedicated non-root `nadi-agent` user.
+- Privileged actions use only the fixed root-owned helper invocation and three operation allowlist.
+- Nginx, firewall, PHP-FPM, Supervisor, and client application configuration are not silently modified.
+- Agent monitoring remains subject to the per-application Central approval and signed, acknowledged Activation Grant gate.
+
+### Explicit unresolved specification gaps — do not silently treat as compliant
+
+- **RESTORE behavior:** Master Architecture requires reinstall to restore an existing valid Agent identity and requires `recovery_required` when it cannot be verified. The current helper still fails closed when `/var/lib/nadi/state.json` exists; it does not yet implement Agent-mediated identity restore/repair.
+- **Canonical state subdirectory:** ADR-0001 describes persistent state under `/var/lib/nadi/state/`, while the current Agent StateStore still uses `/var/lib/nadi/state.json`. This path discrepancy requires a deliberate migration/compatibility decision and tests; do not silently move existing state.
+- **Additional application lifecycle:** Master Architecture describes an additional Laravel application reusing the existing Agent and authorizing a new application. The inspected Central implementation currently has no append-application endpoint and rejects a second enrollment for an already registered `agent_instance_id`. Current supported enrollment is therefore one initial request containing all 1–20 applications on that server. Supporting later additions requires a Central API/architecture decision; Central remains read-only in this work.
+- **Rollback:** Master and Agent Side specifications require safe rollback/idempotency. The current helper operations are designed to be retry-safe before enrollment and non-retryable after an uncertain enrollment attempt, but a complete transaction rollback journal and recovery test suite are still missing.
+- **Privileged helper distribution:** The trusted root-owned helper and exact sudoers authorization remain an infrastructure prerequisite. Composer must not bootstrap or replace them with sudo.
+- **Bridge runtime identity:** Installer-managed per-application Bridge identity and environment configuration must be completed without silently editing client application configuration.
+
+These are release blockers, not reasons to weaken the two-command customer experience. No Central source or production host was modified.
