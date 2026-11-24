@@ -2,14 +2,14 @@ package state
 
 import (
 	"crypto/ed25519"
-	"encoding/json"
-	"io"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"syscall"
