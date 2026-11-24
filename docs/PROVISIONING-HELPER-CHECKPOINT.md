@@ -87,6 +87,9 @@ The existing local handoff protocol uses a root-owned broker and kernel-authenti
 - [ ] Bridge runtime configuration still defaults to `storage/app/private/nadi/credential`; it must resolve the external per-application path before end-to-end credential handoff can work.
 - [ ] The helper has not yet been implemented. No root provisioning, enrollment invocation, service start, or deployment was performed.
 
+Latest Agent source commit for this checkpoint: `a0a1fdd434c93702ea858d88f30eff8fe5ecd302`. The previous complete Go validation recorded in PR #2 applies to commit `55ca52ba6de447344bb5f06f80e7d924ef89f863`; no workflow run has been confirmed for the newer broker-hardening commits. Do not treat this checkpoint as CI-validated.
+
+
 
 - [x] Broker credential destinations are constrained to `/var/lib/nadi-bridge/{application_id}/credential`; writable Laravel application trees are rejected.
 - [x] Broker unit source has the fixed runtime directory boundary; the installer must add exact per-application credential-directory write paths rather than granting the whole Bridge data root.
