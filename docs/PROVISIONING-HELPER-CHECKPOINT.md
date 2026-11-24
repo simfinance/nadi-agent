@@ -169,3 +169,22 @@ The Bridge `PrivilegedProvisioner::installAgent()` currently treats every non-ze
 The Bridge config has now removed the unsafe Laravel-storage credential default. `credential_file` and `activation_state_file` are read from installer-managed `NADI_CREDENTIAL_FILE` and `NADI_ACTIVATION_STATE_FILE` environment values and default to null. This is intentionally fail-closed; the privileged helper still must derive and provision the exact per-application paths from Central-issued application UUIDs, and Bridge-side validation/tests for that identity-to-path binding remain pending.
 
 The canonical path decision is resolved by ADR-0001 and the source migration is committed. Remaining installer work must create and validate the five canonical directories, install configuration/key/service assets at those locations, and preserve the Master Architecture restore/idempotency requirements. This is not a production migration.
+
+
+## Canonical path migration validation — latest checkpoint
+
+- [x] ADR-0001 accepted and committed.
+- [x] Agent defaults now use `/var/lib/nadi`, `/etc/nadi/keys`, and `/run/nadi`.
+- [x] Broker mapping and activation-state paths now use `/etc/nadi/bridge-mappings.json` and `/run/nadi/bridge-state/{application_id}.json`.
+- [x] Broker and Agent systemd source units and embedded assets now use the canonical `/etc/nadi`, `/var/lib/nadi`, and `/run/nadi` roots.
+- [x] Broker/config/provisioning tests updated to assert the canonical locations.
+- [x] Bridge no longer defaults credential storage to the Laravel application storage tree; the installer-managed environment settings default to null.
+- [x] Bridge packaged Agent unit and handoff documentation aligned with canonical paths.
+- [ ] Latest Agent CI validation is still running. Workflow #45309436924: https://github.com/simfinance/nadi-agent/actions/runs/45309436924. Formatting job passed; unit tests, race tests, vet, and Linux builds were still running at checkpoint time.
+- [x] Latest Bridge CI validation passed. Workflow #45309364276: https://github.com/simfinance/nadi-laravel-agent/actions/runs/45309364276.
+
+Latest Agent source/test commit: `eacc82e07437eace0bf0b02f50c1ec0da874d3c7`.
+Latest Agent branch head at this checkpoint (documentation included): `b90d47963a72b56e023d454cb01c928d61fc1e73`.
+Latest Bridge branch head: `5fd0a0159d3ee66a6dfa9a8138d266bc62f60332`.
+
+The root-owned provisioning helper, fixed per-application path derivation/validation inside Bridge, systemd reload/start orchestration, post-install verification, rollback, and end-to-end tests remain incomplete. No Central files or production hosts were changed.
