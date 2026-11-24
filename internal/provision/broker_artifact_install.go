@@ -257,6 +257,21 @@ func writeOwnedAtomicFile(
 		if metadata.Mode()&os.ModeSymlink != 0 || !metadata.Mode().IsRegular() {
 			return errors.New("existing destination must be a regular non-symlink file")
 		}
+
+		stat, ok := metadata.Sys().(*syscall.Stat_t)
+		if !ok || int(stat.Uid) != ownerUID || int(stat.Gid) != ownerGID || metadata.Mode().Perm() != mode {
+			return errors.New("existing destination ownership or permissions do not match the managed file policy")
+		}
+
+		existing, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if !bytes.Equal(existing, content) {
+			return errors.New("refusing to overwrite an existing managed file without an approved update operation")
+		}
+
+		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
