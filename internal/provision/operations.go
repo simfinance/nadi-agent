@@ -293,20 +293,6 @@ func runEnrollAgentOperation(request ProvisionOperationRequest, response HelperR
 
 	attemptExists, attemptErr := hasProvisionEnrollmentAttempt()
 	if attemptErr != nil {
-		manifestDigest := sha256.Sum256(enrollmentManifestJSON)
-		attempt := provisionEnrollmentAttempt{
-			ProtocolVersion:  1,
-			ManifestSHA256:   hex.EncodeToString(manifestDigest[:]),
-			ApplicationCount: len(inventory.Applications),
-		}
-		attemptJSON, err := json.Marshal(attempt)
-		if err != nil {
-			return writeOperationFailure(writer, errorWriter, response, errors.New("encode enrollment attempt metadata"))
-		}
-		if err := installImmutableFile(provisionAttemptPath, attemptJSON, 0600, 0, 0); err != nil {
-			return writeOperationFailure(writer, errorWriter, response, errors.New("persist enrollment attempt boundary; enrollment was not started"))
-		}
-
 		response.Phase = "enrollment"
 		response.EnrollmentStatus = "unknown"
 		response.RetrySafe = false
@@ -359,6 +345,20 @@ func runEnrollAgentOperation(request ProvisionOperationRequest, response HelperR
 		return writeOperationFailure(writer, errorWriter, response, err)
 	}
 	defer cleanupManifest()
+
+	manifestDigest := sha256.Sum256(enrollmentManifestJSON)
+	attempt := provisionEnrollmentAttempt{
+		ProtocolVersion:  1,
+		ManifestSHA256:   hex.EncodeToString(manifestDigest[:]),
+		ApplicationCount: len(inventory.Applications),
+	}
+	attemptJSON, err := json.Marshal(attempt)
+	if err != nil {
+		return writeOperationFailure(writer, errorWriter, response, errors.New("encode enrollment attempt metadata"))
+	}
+	if err := installImmutableFile(provisionAttemptPath, attemptJSON, 0600, 0, 0); err != nil {
+		return writeOperationFailure(writer, errorWriter, response, errors.New("persist enrollment attempt boundary; enrollment was not started"))
+	}
 
 	response.Phase = "enrollment"
 	response.EnrollmentStatus = "unknown"
