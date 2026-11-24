@@ -134,6 +134,51 @@ func TestValidateApplicationTargetsRequiresMatchingRootOwnedPHPFPMPool(t *testin
 	}
 }
 
+func TestValidateRootOwnedDirectoryChainRejectsSymlinkComponent(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target")
+	if err := os.Mkdir(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	link := filepath.Join(root, "linked")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	err := validateRootOwnedDirectoryChain(root, filepath.Join(link, "pool.d"))
+	if err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("expected symlink directory component to be rejected, got %v", err)
+	}
+}
+
+func TestValidateRootOwnedDirectoryChainRejectsDirectoryOutsideRoot(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+
+	err := validateRootOwnedDirectoryChain(root, outside)
+	if err == nil {
+		t.Fatal("directory outside the PHP-FPM configuration root must be rejected")
+	}
+}
+
+func TestReadRootOwnedRegularFileRejectsSymlink(t *testing.T) {
+	directory := t.TempDir()
+	target := filepath.Join(directory, "target.conf")
+	if err := os.WriteFile(target, []byte("[www]\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	link := filepath.Join(directory, "linked.conf")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := readRootOwnedRegularFile(link, 64*1024); err == nil {
+		t.Fatal("symlinked PHP-FPM pool configuration must be rejected")
+	}
+}
+
 func TestSafeHelperMessageTruncatesLongErrors(t *testing.T) {
 	message := safeHelperMessage(errors.New(strings.Repeat("x", 600)))
 	if len(message) > 512 {
