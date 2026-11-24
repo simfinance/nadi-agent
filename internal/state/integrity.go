@@ -2,6 +2,8 @@ package state
 
 import (
 	"crypto/ed25519"
+	"encoding/json"
+	"io"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/base64"
@@ -118,9 +120,12 @@ func loadExistingIntegrityKey(directory string) (ed25519.PrivateKey, error) {
 		return nil, errors.New("Agent state integrity key changed during read")
 	}
 
-	content, err := os.ReadFile(path)
+	content, err := io.ReadAll(io.LimitReader(file, 4097))
 	if err != nil {
 		return nil, fmt.Errorf("read Agent state integrity key: %w", err)
+	}
+	if len(content) > 4096 {
+		return nil, errors.New("Agent state integrity key exceeds the size limit")
 	}
 
 	block, rest := pem.Decode(content)
@@ -182,4 +187,15 @@ func verifyIntegrity(current State, publicKey ed25519.PublicKey) error {
 	}
 
 	return nil
+}
+
+func jsonStateForSignature(current State) ([]byte, error) {
+	current.IntegritySignature = ""
+
+	content, err := json.Marshal(current)
+	if err != nil {
+		return nil, fmt.Errorf("encode Agent state for integrity signature: %w", err)
+	}
+
+	return content, nil
 }
