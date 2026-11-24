@@ -1,0 +1,635 @@
+package provision
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"os/user"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	_ "embed"
+
+	"nadi-agent/internal/handoffbroker"
+)
+
+const (
+	agentAccountName       = "nadi-agent"
+	agentBinaryPath        = "/opt/nadi/bin/nadi-agent"
+	agentStateDirectory    = "/var/lib/nadi"
+	agentStateFile          = "/var/lib/nadi/state.json"
+	agentManifestPath       = "/etc/nadi/applications.json"
+	agentUnitPath           = "/etc/systemd/system/nadi-agent.service"
+	brokerUnitPath          = "/etc/systemd/system/nadi-handoff-broker.service"
+	activationPublicKeyPath = "/etc/nadi/keys/activation-public.pem"
+	maximumArtifactBytes    = 128 << 20
+	maximumHelperOutput     = 16 << 10
+)
+
+//go:embed assets/activation-public.pem
+var helperActivationPublicKey []byte
+
+//go:embed assets/nadi-agent.service
+var helperAgentUnit []byte
+
+//go:embed assets/nadi-handoff-broker.service
+var helperBrokerUnit []byte
+
+type HelperResponse struct {
+	ProtocolVersion  int    `json:"protocol_version"`
+	Success          bool   `json:"success"`
+	Phase            string `json:"phase"`
+	EnrollmentStatus string `json:"enrollment_status"`
+	RetrySafe        bool   `json:"retry_safe"`
+	AgentVersion     string `json:"agent_version"`
+	ApplicationCount int    `json:"application_count"`
+	Message          string `json:"message"`
+}
+
+type helperRuntimeIdentity struct {
+	uid int
+	gid int
+}
+
+func RunPrivileged(reader io.Reader, writer io.Writer, errorWriter io.Writer) int {
+	response := HelperResponse{
+		ProtocolVersion:  1,
+		Phase:            "request_validation",
+		EnrollmentStatus: "not_started",
+		RetrySafe:        true,
+		AgentVersion:     "unknown",
+	}
+
+	if os.Geteuid() != 0 {
+		response.Message = "NADI provisioning helper requires root."
+		writeHelperResponse(writer, response)
+		fmt.Fprintln(errorWriter, response.Message)
+		return 1
+	}
+
+	request, releaseManifestJSON, enrollmentManifestJSON, err := DecodeProvisionRequest(reader)
+	if err != nil {
+		response.Message = safeHelperMessage(err)
+		writeHelperResponse(writer, response)
+		fmt.Fprintln(errorWriter, response.Message)
+		return 1
+	}
+
+	response.ApplicationCount = len(request.Applications)
+	response.Phase = "release_verification"
+
+	releaseManifest, err := VerifySignedRelease(releaseManifestJSON, request.Release.SignatureBase64)
+	if err != nil {
+		response.Message = safeHelperMessage(err)
+		writeHelperResponse(writer, response)
+		fmt.Fprintln(errorWriter, response.Message)
+		return 1
+	}
+
+	artifact, err := SelectReleaseArtifact(releaseManifest, runtime.GOARCH)
+	if err != nil {
+		response.Message = safeHelperMessage(err)
+		writeHelperResponse(writer, response)
+		fmt.Fprintln(errorWriter, response.Message)
+		return 1
+	}
+
+	if filepath.Base(request.Release.ArtifactPath) != artifact.Filename {
+		response.Message = "Staged Agent artifact filename does not match the signed release manifest."
+		writeHelperResponse(writer, response)
+		fmt.Fprintln(errorWriter, response.Message)
+		return 1
+	}
+
+	if err := validateStagedArtifactOwner(request); err != nil {
+		response.Message = safeHelperMessage(err)
+		writeHelperResponse(writer, response)
+		fmt.Fprintln(errorWriter, response.Message)
+		return 1
+	}
+
+	if err := VerifyReleaseArtifact(request.Release.ArtifactPath, artifact); err != nil {
+		response.Message = safeHelperMessage(err)
+		writeHelperResponse(writer, response)
+		fmt.Fprintln(errorWriter, response.Message)
+		return 1
+	}
+
+	if err := rejectExistingAgentState(); err != nil {
+		response.Phase = "existing_installation"
+		response.Message = safeHelperMessage(err)
+		response.RetrySafe = false
+		writeHelperResponse(writer, response)
+		fmt.Fprintln(errorWriter, response.Message)
+		return 1
+	}
+
+	response.Phase = "os_provisioning"
+
+	identity, err := ensureAgentAccount()
+	if err != nil {
+		response.Message = safeHelperMessage(err)
+		writeHelperResponse(writer, response)
+		fmt.Fprintln(errorWriter, response.Message)
+		return 1
+	}
+
+	if err := prepareAgentDirectories(identity); err != nil {
+		response.Message = safeHelperMessage(err)
+		writeHelperResponse(writer, response)
+		fmt.Fprintln(errorWriter, response.Message)
+		return 1
+	}
+
+	if err := installAgentAssets(request.Release.ArtifactPath, artifact.SHA256); err != nil {
+		response.Message = safeHelperMessage(err)
+		writeHelperResponse(writer, response)
+		fmt.Fprintln(errorWriter, response.Message)
+		return 1
+	}
+
+	manifestPath, cleanupManifest, err := writeEnrollmentManifest(enrollmentManifestJSON, identity)
+	if err != nil {
+		response.Message = safeHelperMessage(err)
+		writeHelperResponse(writer, response)
+		fmt.Fprintln(errorWriter, response.Message)
+		return 1
+	}
+	defer cleanupManifest()
+
+	response.Phase = "enrollment"
+	response.EnrollmentStatus = "unknown"
+	response.RetrySafe = false
+
+	summaryJSON, err := runAgentEnrollment(manifestPath, request.Enrollment.Token, identity)
+	if err != nil {
+		response.Message = "Agent enrollment outcome is uncertain. Preserve local state and do not retry with a new token."
+		writeHelperResponse(writer, response)
+		fmt.Fprintln(errorWriter, response.Message)
+		return 1
+	}
+
+	response.EnrollmentStatus = "registered"
+	response.Phase = "broker_configuration"
+
+	brokerConfig, mappingJSON, dropIn, err := BuildBrokerArtifacts(
+		uint32(identity.uid),
+		uint32(identity.gid),
+		request,
+		summaryJSON,
+	)
+	if err != nil {
+		response.Message = "Central enrollment succeeded, but broker configuration could not be prepared. Preserve Agent state; do not repeat enrollment."
+		writeHelperResponse(writer, response)
+		fmt.Fprintln(errorWriter, response.Message)
+		return 1
+	}
+
+	if err := InstallBrokerArtifacts(brokerConfig, mappingJSON, dropIn); err != nil {
+		response.Message = "Central enrollment succeeded, but broker artifacts could not be installed. Preserve Agent state; do not repeat enrollment."
+		writeHelperResponse(writer, response)
+		fmt.Fprintln(errorWriter, response.Message)
+		return 1
+	}
+
+	response.Phase = "service_activation"
+
+	if err := activateAgentServices(); err != nil {
+		response.Message = "Central enrollment succeeded, but NADI services did not pass startup verification. Preserve Agent state; do not repeat enrollment."
+		writeHelperResponse(writer, response)
+		fmt.Fprintln(errorWriter, response.Message)
+		return 1
+	}
+
+	response.Success = true
+	response.Phase = "completed"
+	response.Message = "NADI Agent enrollment and service startup completed."
+	response.AgentVersion = releaseManifest.Version
+	response.RetrySafe = false
+	writeHelperResponse(writer, response)
+
+	return 0
+}
+
+func validateStagedArtifactOwner(request ProvisionRequest) error {
+	path := request.Release.ArtifactPath
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return errors.New("staged Agent artifact path must be absolute and canonical")
+	}
+
+	var matched *ProvisionApplication
+
+	for index := range request.Applications {
+		stagingDirectory := filepath.Join(
+			request.Applications[index].BasePath,
+			"storage",
+			"app",
+			"private",
+			"nadi",
+			"releases",
+			"staging",
+		)
+		if strings.HasPrefix(path, stagingDirectory+string(os.PathSeparator)) {
+			if matched != nil {
+				return errors.New("staged Agent artifact path ambiguously matches multiple applications")
+			}
+			matched = &request.Applications[index]
+		}
+	}
+
+	if matched == nil {
+		return errors.New("staged Agent artifact must be inside a registered Laravel application's private release staging directory")
+	}
+
+	if err := ensureNoSymlinkPath(filepath.Dir(path)); err != nil {
+		return fmt.Errorf("staged Agent artifact parent path is unsafe: %w", err)
+	}
+
+	metadata, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("inspect staged Agent artifact: %w", err)
+	}
+
+	if metadata.Mode()&os.ModeSymlink != 0 || !metadata.Mode().IsRegular() {
+		return errors.New("staged Agent artifact must be a regular non-symlink file")
+	}
+
+	if metadata.Size() < 1 || metadata.Size() > maximumArtifactBytes {
+		return errors.New("staged Agent artifact size is outside the allowed limit")
+	}
+
+	stat, ok := metadata.Sys().(*syscall.Stat_t)
+	if !ok || int(stat.Uid) != matched.RuntimeUID || int(stat.Gid) != matched.RuntimeGID {
+		return errors.New("staged Agent artifact ownership does not match the registered Laravel runtime identity")
+	}
+
+	if metadata.Mode().Perm()&0022 != 0 {
+		return errors.New("staged Agent artifact must not be group- or other-writable")
+	}
+
+	return nil
+}
+
+func rejectExistingAgentState() error {
+	metadata, err := os.Lstat(agentStateFile)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect existing Agent state: %w", err)
+	}
+
+	if metadata.Mode()&os.ModeSymlink != 0 || !metadata.Mode().IsRegular() {
+		return errors.New("existing Agent state path is unsafe; automatic replacement is prohibited")
+	}
+
+	return errors.New("existing Agent state was found; use the identity-restore or repair workflow instead of a new enrollment")
+}
+
+func ensureAgentAccount() (helperRuntimeIdentity, error) {
+	group, err := user.LookupGroup(agentAccountName)
+	if err != nil {
+		if _, runErr := runTrustedCommand("/usr/sbin/groupadd", "--system", agentAccountName); runErr != nil {
+			return helperRuntimeIdentity{}, fmt.Errorf("create dedicated NADI system group: %w", runErr)
+		}
+		group, err = user.LookupGroup(agentAccountName)
+	}
+	if err != nil {
+		return helperRuntimeIdentity{}, fmt.Errorf("resolve dedicated NADI system group: %w", err)
+	}
+
+	groupID, err := strconv.Atoi(group.Gid)
+	if err != nil || groupID < 1 {
+		return helperRuntimeIdentity{}, errors.New("dedicated NADI system group has an invalid GID")
+	}
+
+	account, err := user.Lookup(agentAccountName)
+	if err != nil {
+		_, runErr := runTrustedCommand(
+			"/usr/sbin/useradd",
+			"--system",
+			"--gid", agentAccountName,
+			"--home-dir", agentStateDirectory,
+			"--no-create-home",
+			"--shell", "/usr/sbin/nologin",
+			agentAccountName,
+		)
+		if runErr != nil {
+			return helperRuntimeIdentity{}, fmt.Errorf("create dedicated NADI system account: %w", runErr)
+		}
+		account, err = user.Lookup(agentAccountName)
+	}
+	if err != nil {
+		return helperRuntimeIdentity{}, fmt.Errorf("resolve dedicated NADI system account: %w", err)
+	}
+
+	uid, err := strconv.Atoi(account.Uid)
+	if err != nil || uid < 1 || uid == 0 {
+		return helperRuntimeIdentity{}, errors.New("dedicated NADI runtime UID must be non-root")
+	}
+
+	accountGID, err := strconv.Atoi(account.Gid)
+	if err != nil || accountGID != groupID {
+		return helperRuntimeIdentity{}, errors.New("dedicated NADI account must use its fixed primary group")
+	}
+
+	return helperRuntimeIdentity{uid: uid, gid: groupID}, nil
+}
+
+func prepareAgentDirectories(identity helperRuntimeIdentity) error {
+	directories := []struct {
+		path string
+		mode os.FileMode
+		uid  int
+		gid  int
+	}{
+		{path: "/opt/nadi", mode: 0755, uid: 0, gid: 0},
+		{path: "/opt/nadi/bin", mode: 0755, uid: 0, gid: 0},
+		{path: "/etc/nadi", mode: 0750, uid: 0, gid: 0},
+		{path: "/etc/nadi/keys", mode: 0750, uid: 0, gid: 0},
+		{path: "/var/lib/nadi", mode: 0700, uid: identity.uid, gid: identity.gid},
+		{path: "/var/log/nadi", mode: 0750, uid: identity.uid, gid: identity.gid},
+		{path: "/run/nadi", mode: 0755, uid: 0, gid: 0},
+	}
+
+	for _, directory := range directories {
+		if err := ensureDirectoryTree(
+			string(os.PathSeparator),
+			directory.path,
+			directory.mode,
+			directory.uid,
+			directory.gid,
+		); err != nil {
+			return fmt.Errorf("prepare %s: %w", directory.path, err)
+		}
+	}
+
+	return nil
+}
+
+func installAgentAssets(artifactPath string, expectedDigest string) error {
+	artifact, err := os.ReadFile(artifactPath)
+	if err != nil {
+		return fmt.Errorf("read verified Agent artifact: %w", err)
+	}
+	if len(artifact) == 0 || len(artifact) > maximumArtifactBytes {
+		return errors.New("verified Agent artifact size is invalid")
+	}
+
+	digest := sha256.Sum256(artifact)
+	if hex.EncodeToString(digest[:]) != expectedDigest {
+		return errors.New("Agent artifact changed after signature and checksum verification")
+	}
+
+	if err := installImmutableFile(agentBinaryPath, artifact, 0755, 0, 0); err != nil {
+		return fmt.Errorf("install Agent binary: %w", err)
+	}
+	if err := installImmutableFile(activationPublicKeyPath, helperActivationPublicKey, 0644, 0, 0); err != nil {
+		return fmt.Errorf("install Activation Grant public key: %w", err)
+	}
+	if err := installImmutableFile(agentUnitPath, helperAgentUnit, 0644, 0, 0); err != nil {
+		return fmt.Errorf("install Agent systemd unit: %w", err)
+	}
+	if err := installImmutableFile(brokerUnitPath, helperBrokerUnit, 0644, 0, 0); err != nil {
+		return fmt.Errorf("install Broker systemd unit: %w", err)
+	}
+
+	return nil
+}
+
+func installImmutableFile(path string, content []byte, mode os.FileMode, uid int, gid int) error {
+	metadata, err := os.Lstat(path)
+	if err == nil {
+		if metadata.Mode()&os.ModeSymlink != 0 || !metadata.Mode().IsRegular() {
+			return errors.New("existing installation destination is not a regular file")
+		}
+		existing, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if !bytes.Equal(existing, content) {
+			return fmt.Errorf("refusing to overwrite existing file %s without an approved update operation", path)
+		}
+		stat, ok := metadata.Sys().(*syscall.Stat_t)
+		if !ok || int(stat.Uid) != uid || int(stat.Gid) != gid || metadata.Mode().Perm() != mode {
+			return fmt.Errorf("existing file %s has unexpected ownership or permissions", path)
+		}
+		return nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	return writeOwnedAtomicFile(path, content, mode, uid, gid)
+}
+
+func writeEnrollmentManifest(content []byte, identity helperRuntimeIdentity) (string, func(), error) {
+	if len(content) == 0 || len(content) > 32*1024 {
+		return "", func() {}, errors.New("enrollment manifest size is invalid")
+	}
+
+	file, err := os.CreateTemp("/run/nadi", ".nadi-enrollment-*.json")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("create temporary enrollment manifest: %w", err)
+	}
+
+	path := file.Name()
+	cleanup := func() {
+		_ = os.Remove(path)
+	}
+
+	if err := file.Chmod(0640); err != nil {
+		file.Close()
+		cleanup()
+		return "", func() {}, err
+	}
+	if err := file.Chown(0, identity.gid); err != nil {
+		file.Close()
+		cleanup()
+		return "", func() {}, err
+	}
+	if _, err := file.Write(content); err != nil {
+		file.Close()
+		cleanup()
+		return "", func() {}, err
+	}
+	if err := file.Sync(); err != nil {
+		file.Close()
+		cleanup()
+		return "", func() {}, err
+	}
+	if err := file.Close(); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
+
+	return path, cleanup, nil
+}
+
+func runAgentEnrollment(manifestPath string, token string, identity helperRuntimeIdentity) ([]byte, error) {
+	if token == "" {
+		return nil, errors.New("enrollment token is empty")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	command := exec.CommandContext(
+		ctx,
+		agentBinaryPath,
+		"--enroll",
+		"--manifest", manifestPath,
+		"--enrollment-token-stdin",
+		"--enrollment-summary-stdout",
+	)
+	command.Env = []string{
+		"PATH=/usr/sbin:/usr/bin:/sbin:/bin",
+		"HOME=" + agentStateDirectory,
+		"NADI_CENTRAL_URL=https://nadi.pesantrenalirsyad.org",
+		"NADI_STATE_DIR=" + agentStateDirectory,
+		"NADI_ACTIVATION_PUBLIC_KEY=" + activationPublicKeyPath,
+		"NADI_ACTIVATION_KEY_ID=nadi-central-2026-01",
+		"NADI_AGENT_HANDOFF_SOCKET=/run/nadi/credential-handoff.sock",
+	}
+	command.SysProcAttr = &syscall.SysProcAttr{
+		Credential: &syscall.Credential{
+			Uid: uint32(identity.uid),
+			Gid: uint32(identity.gid),
+			Groups: []uint32{uint32(identity.gid)},
+		},
+		Setpgid: true,
+	}
+
+	tokenInput := []byte(token + "\n")
+	command.Stdin = bytes.NewReader(tokenInput)
+
+	var stdout boundedBuffer
+	var stderr boundedBuffer
+	stdout.maximum = maximumHelperOutput
+	stderr.maximum = 4 * 1024
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+
+	runErr := command.Run()
+	for index := range tokenInput {
+		tokenInput[index] = 0
+	}
+
+	if runErr != nil {
+		if ctx.Err() != nil {
+			return nil, errors.New("Agent enrollment command timed out; Central outcome is unknown")
+		}
+		return nil, errors.New("Agent enrollment command failed; Central outcome is unknown")
+	}
+
+	if stdout.overflow {
+		return nil, errors.New("Agent enrollment summary exceeded the allowed size")
+	}
+
+	summary := append([]byte(nil), stdout.buffer.Bytes()...)
+	if len(summary) == 0 {
+		return nil, errors.New("Agent enrollment completed without a summary")
+	}
+
+	return summary, nil
+}
+
+type boundedBuffer struct {
+	buffer   bytes.Buffer
+	maximum  int
+	overflow bool
+}
+
+func (b *boundedBuffer) Write(content []byte) (int, error) {
+	if b.buffer.Len()+len(content) > b.maximum {
+		b.overflow = true
+		return len(content), nil
+	}
+	return b.buffer.Write(content)
+}
+
+func activateAgentServices() error {
+	if _, err := runTrustedCommand("/usr/bin/systemctl", "daemon-reload"); err != nil {
+		return fmt.Errorf("reload systemd units: %w", err)
+	}
+	if _, err := runTrustedCommand("/usr/bin/systemctl", "enable", "--now", "nadi-handoff-broker.service"); err != nil {
+		return fmt.Errorf("enable and start handoff broker: %w", err)
+	}
+	if _, err := runTrustedCommand("/usr/bin/systemctl", "is-active", "--quiet", "nadi-handoff-broker.service"); err != nil {
+		return errors.New("handoff broker did not become active")
+	}
+	if _, err := runTrustedCommand("/usr/bin/systemctl", "enable", "--now", "nadi-agent.service"); err != nil {
+		return fmt.Errorf("enable and start Agent service: %w", err)
+	}
+	if _, err := runTrustedCommand("/usr/bin/systemctl", "is-active", "--quiet", "nadi-agent.service"); err != nil {
+		return errors.New("Agent service did not become active")
+	}
+
+	return nil
+}
+
+func runTrustedCommand(path string, arguments ...string) ([]byte, error) {
+	metadata, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("trusted system command %s is unavailable: %w", path, err)
+	}
+	if metadata.Mode()&os.ModeSymlink != 0 || !metadata.Mode().IsRegular() || metadata.Mode().Perm()&0022 != 0 {
+		return nil, fmt.Errorf("trusted system command %s has unsafe file metadata", path)
+	}
+	stat, ok := metadata.Sys().(*syscall.Stat_t)
+	if !ok || stat.Uid != 0 || metadata.Mode().Perm()&0111 == 0 {
+		return nil, fmt.Errorf("trusted system command %s must be root-owned and executable", path)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	command := exec.CommandContext(ctx, path, arguments...)
+	command.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin"}
+	output, err := command.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("execute trusted system command %s: %w", filepath.Base(path), err)
+	}
+
+	return output, nil
+}
+
+func writeHelperResponse(writer io.Writer, response HelperResponse) {
+	encoder := json.NewEncoder(writer)
+	encoder.SetEscapeHTML(false)
+	_ = encoder.Encode(response)
+}
+
+func safeHelperMessage(err error) string {
+	message := strings.TrimSpace(err.Error())
+	if len(message) > 512 {
+		message = message[:512]
+	}
+	return message
+}
+
+func decodeHelperArtifactManifest(content []byte) (ReleaseManifest, error) {
+	var manifest ReleaseManifest
+	decoder := json.NewDecoder(bytes.NewReader(content))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&manifest); err != nil {
+		return ReleaseManifest{}, err
+	}
+	return manifest, nil
+}
+
+func encodeHelperManifestBase64(content []byte) string {
+	return base64.StdEncoding.EncodeToString(content)
+}
