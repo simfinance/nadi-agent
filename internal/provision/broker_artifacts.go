@@ -28,8 +28,11 @@ type enrollmentSummary struct {
 }
 
 type enrollmentSummaryApplication struct {
-	ApplicationID  string `json:"application_id"`
-	ApplicationKey string `json:"application_key"`
+	ApplicationID   string `json:"application_id"`
+	ApplicationKey  string `json:"application_key"`
+	ApplicationName string `json:"application_name"`
+	Environment     string `json:"environment"`
+	RegistrationID  string `json:"registration_id"`
 }
 
 // BuildBrokerArtifacts reconciles the non-secret Agent enrollment summary with
