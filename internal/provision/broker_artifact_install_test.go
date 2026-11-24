@@ -46,6 +46,14 @@ func TestInstallBrokerArtifactsWritesOnlyValidatedDestinations(t *testing.T) {
 		t.Fatalf("valid broker artifacts were rejected: %v", err)
 	}
 
+	configDirectoryInfo, err := os.Stat(filepath.Join(root, "etc", "nadi"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configDirectoryInfo.Mode().Perm() != 0750 {
+		t.Fatalf("expected /etc/nadi mode 0750, got %04o", configDirectoryInfo.Mode().Perm())
+	}
+
 	mappingPath := filepath.Join(root, "etc", "nadi", "bridge-mappings.json")
 	mappingInfo, err := os.Stat(mappingPath)
 	if err != nil {
