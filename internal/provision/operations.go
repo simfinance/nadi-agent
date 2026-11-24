@@ -810,7 +810,7 @@ func runStartAgentOperation(response HelperResponse, writer io.Writer, errorWrit
 	response.AgentVersion = completion.AgentVersion
 	response.ApplicationCount = completion.ApplicationCount
 
-	if err := verifyExistingEnrollmentIdentity(inventory.Applications, inventory.ArtifactSHA256); err != nil {
+	if err := verifyExistingEnrollmentIdentity(inventory.Applications, inventory.ArtifactSHA256, completion); err != nil {
 		response.Phase = "recovery_required"
 		response.EnrollmentStatus = "unknown"
 		response.RetrySafe = false
