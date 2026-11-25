@@ -120,3 +120,17 @@ func TestValidateRejectsRelativeHandoffSocketPath(t *testing.T) {
 		t.Fatal("expected relative handoff socket path to be rejected")
 	}
 }
+
+
+func TestLoadUsesCanonicalStateDirectory(t *testing.T) {
+	t.Setenv("NADI_CENTRAL_URL", "https://central.example.test")
+	t.Setenv("NADI_STATE_DIR", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load default config: %v", err)
+	}
+	if cfg.StateDir != "/var/lib/nadi/state" {
+		t.Fatalf("expected canonical state directory, got %q", cfg.StateDir)
+	}
+}
