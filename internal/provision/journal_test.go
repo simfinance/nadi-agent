@@ -1,6 +1,7 @@
 package provision
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
