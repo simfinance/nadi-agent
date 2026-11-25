@@ -78,12 +78,42 @@ fi
 
 if ! id nadi-agent >/dev/null 2>&1; then
     useradd --system --home-dir /var/lib/nadi/state --shell /usr/sbin/nologin nadi-agent
+else
+    account_home="$(getent passwd nadi-agent | cut -d: -f6)"
+    if [[ "${account_home}" != "${STATE_DIR}" ]]; then
+        echo "ERROR: home directory user nadi-agent tidak sesuai ADR-0001 (${account_home})." >&2
+        echo "Installer tidak mengubah metadata akun sistem secara otomatis." >&2
+        exit 1
+    fi
 fi
+
+state_dir_owner="$(stat -c '%U:%G' "${STATE_DIR}")"
+state_dir_mode="$(stat -c '%a' "${STATE_DIR}")"
+if [[ "${state_dir_owner}" != "nadi-agent:nadi-agent" || "${state_dir_mode}" != "700" ]]; then
+    echo "ERROR: state directory harus 700 nadi-agent:nadi-agent (saat ini ${state_dir_mode} ${state_dir_owner})." >&2
+    exit 1
+fi
+
+for data_dir in /var/lib/nadi /var/lib/nadi/spool /var/lib/nadi/engines; do
+    if [[ -e "${data_dir}" ]]; then
+        if [[ ! -d "${data_dir}" || -L "${data_dir}" ]]; then
+            echo "ERROR: direktori data tidak aman: ${data_dir}" >&2
+            exit 1
+        fi
+        data_dir_owner="$(stat -c '%U:%G' "${data_dir}")"
+        data_dir_mode="$(stat -c '%a' "${data_dir}")"
+        if [[ "${data_dir_owner}" != "nadi-agent:nadi-agent" || "${data_dir_mode}" != "700" ]]; then
+            echo "ERROR: permission direktori tidak sesuai: ${data_dir} (${data_dir_mode} ${data_dir_owner})." >&2
+            exit 1
+        fi
+    else
+        install -d -o nadi-agent -g nadi-agent -m 0700 "${data_dir}"
+    fi
+done
 
 install -d -o root -g root -m 0755 /opt/nadi /opt/nadi/bin
 install -d -o root -g root -m 0755 /etc/nadi
 install -d -o root -g root -m 0755 /etc/nadi/keys
-install -d -o nadi-agent -g nadi-agent -m 0700 /var/lib/nadi /var/lib/nadi/state /var/lib/nadi/spool /var/lib/nadi/engines
 
 if [[ ! -e "${ENV_TARGET}" ]]; then
     cat > "${ENV_TARGET}" <<'ENVEOF'
@@ -97,6 +127,13 @@ NADI_HTTP_TIMEOUT_SECONDS=10
 ENVEOF
     chown root:nadi-agent "${ENV_TARGET}"
     chmod 0640 "${ENV_TARGET}"
+else
+    if ! grep -Fxq "NADI_STATE_DIR=/var/lib/nadi/state" "${ENV_TARGET}" ||
+        ! grep -Fxq "NADI_ACTIVATION_PUBLIC_KEY=/etc/nadi/keys/activation-public.pem" "${ENV_TARGET}"; then
+        echo "ERROR: konfigurasi environment existing tidak sesuai layout ADR-0001." >&2
+        echo "Installer tidak menimpa konfigurasi existing secara otomatis." >&2
+        exit 1
+    fi
 fi
 
 if [[ -e "${BINARY_TARGET}" ]]; then
@@ -112,8 +149,6 @@ mv -f "${BINARY_TARGET}.new" "${BINARY_TARGET}"
 install -o root -g root -m 0644 "${UNIT_SOURCE}" "${UNIT_TARGET}"
 chown root:root "${KEY_FILE}"
 chmod 0644 "${KEY_FILE}"
-chown nadi-agent:nadi-agent "${STATE_DIR}"
-chmod 0700 "${STATE_DIR}"
 
 systemctl daemon-reload
 
