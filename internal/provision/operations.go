@@ -603,6 +603,33 @@ func restoreExistingAgentIdentity(
 		return rollbackFailure(err)
 	}
 
+	identityRecord, err := decodeEnrollmentIdentitySummary(summaryJSON)
+	if err != nil {
+		return rollbackFailure(fmt.Errorf("verify existing Agent identity summary: %w", err))
+	}
+
+	if existingCompletion, completionErr := readProvisionCompletion(); completionErr == nil {
+		if existingCompletion.AgentInstanceID != identityRecord.AgentInstanceID ||
+			existingCompletion.AgentID != identityRecord.AgentID ||
+			existingCompletion.ServerID != identityRecord.ServerID {
+			return rollbackFailure(errors.New("existing Agent identity does not match the root-owned enrollment completion record"))
+		}
+		if existingCompletion.ApplicationCount != len(request.Applications) {
+			return rollbackFailure(errors.New("RESTORE cannot change the application inventory of an existing Agent identity"))
+		}
+	} else if !errors.Is(completionErr, os.ErrNotExist) {
+		return rollbackFailure(errors.New("existing enrollment completion metadata is unsafe or invalid; reconcile identity before RESTORE"))
+	}
+
+	if existingInventory, inventoryErr := readProvisionInventory(); inventoryErr == nil {
+		if existingInventory.ArtifactSHA256 != artifactSHA256 ||
+			!sameApplicationInventory(existingInventory.Applications, request.Applications) {
+			return rollbackFailure(errors.New("RESTORE cannot replace the installed Agent release identity or application inventory"))
+		}
+	} else if !errors.Is(inventoryErr, os.ErrNotExist) {
+		return rollbackFailure(errors.New("existing provisioning inventory is unsafe or invalid; reconcile identity before RESTORE"))
+	}
+
 	legacyRequest := ProvisionRequest{
 		Applications: request.Applications,
 	}
