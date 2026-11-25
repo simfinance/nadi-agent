@@ -55,6 +55,26 @@ func TestValidateActivationRequestAcceptsActiveGrantCapabilities(t *testing.T) {
 	}
 }
 
+func TestValidateActivationRequestAcceptsSystemLogsGrantCapability(t *testing.T) {
+	now := time.Now().UTC()
+	request := Request{
+		ProtocolVersion:   1,
+		Operation:         "publish_activation_state",
+		ApplicationID:     "00000000-0000-4000-8000-000000000001",
+		ApplicationKey:    "stable-key",
+		ActivationState:   "active",
+		MonitoringEnabled: true,
+		GrantAcknowledged: true,
+		Capabilities:      []string{"application_metrics", "system_logs"},
+		ObservedAt:        now.Format(time.RFC3339),
+		ValidUntil:        now.Add(time.Minute).Format(time.RFC3339),
+	}
+
+	if err := validateActivationRequest(request, now); err != nil {
+		t.Fatalf("valid Central system_logs capability was rejected: %v", err)
+	}
+}
+
 func TestValidateActivationRequestRejectsBridgeCapabilityNames(t *testing.T) {
 	now := time.Now().UTC()
 	request := Request{
