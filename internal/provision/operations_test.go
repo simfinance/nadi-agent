@@ -242,6 +242,31 @@ func TestReconcileRestoreMetadataPreservesVerifiedRecords(t *testing.T) {
 			wantCompletionExists: true,
 		},
 		{
+			name: "create both missing records",
+		},
+		{
+			name:       "reject Central Agent ID mismatch",
+			completion: func() *provisionCompletion { value := completion; value.AgentID = "different"; return &value }(),
+			inventory:  &inventory,
+			wantError:  true,
+		},
+		{
+			name:       "reject Central server ID mismatch",
+			completion: func() *provisionCompletion { value := completion; value.ServerID = "different"; return &value }(),
+			inventory:  &inventory,
+			wantError:  true,
+		},
+		{
+			name:       "reject inventory release version mismatch",
+			completion: &completion,
+			inventory: func() *provisionInventory {
+				value := inventory
+				value.AgentVersion = "9.9.9"
+				return &value
+			}(),
+			wantError: true,
+		},
+		{
 			name:       "reject Agent instance mismatch",
 			completion: func() *provisionCompletion { value := completion; value.AgentInstanceID = "different"; return &value }(),
 			inventory:  &inventory,
