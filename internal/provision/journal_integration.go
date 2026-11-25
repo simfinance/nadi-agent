@@ -483,6 +483,20 @@ func recoverProvisionJournalForInstall(
 		return false, fmt.Errorf("previous provisioning journal cannot be verified: %w", err)
 	}
 
+	if journal.Operation == "enroll_agent" {
+		inventory, inventoryErr := readProvisionInventory()
+		if inventoryErr != nil ||
+			inventory.AgentVersion != releaseVersion ||
+			inventory.ArtifactSHA256 != artifactSHA256 ||
+			!sameApplicationInventory(inventory.Applications, applications) {
+			return false, errors.New("interrupted enrollment journal does not match the requested installed inventory; preserve Agent identity and reconcile manually")
+		}
+		if err := recoverEnrollmentJournal(inventory); err != nil {
+			return false, fmt.Errorf("recover interrupted enrollment before installation: %w", err)
+		}
+		return false, nil
+	}
+
 	switch journal.Phase {
 	case "committed":
 		if journal.Operation == "enroll_agent" {
