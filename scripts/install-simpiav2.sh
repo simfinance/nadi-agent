@@ -56,13 +56,13 @@ if [[ ! -f "${UNIT_SOURCE}" ]]; then
     exit 1
 fi
 
-if [[ ! -s "${KEY_FILE}" ]]; then
-    echo "ERROR: Activation public key tidak ditemukan: ${KEY_FILE}" >&2
+if [[ -L "${KEY_FILE}" || ! -s "${KEY_FILE}" ]]; then
+    echo "ERROR: Activation public key tidak ditemukan atau berupa symlink: ${KEY_FILE}" >&2
     echo "Installer tidak membuat atau mengganti trust anchor Central." >&2
     exit 1
 fi
 
-if [[ ! -s "${STATE_DIR}/state.json" ]]; then
+if [[ -L "${STATE_DIR}/state.json" || ! -s "${STATE_DIR}/state.json" ]]; then
     echo "ERROR: state.json enrollment tidak ditemukan di ${STATE_DIR}." >&2
     echo "Installer dihentikan agar tidak memasang service dengan identitas Agent kosong." >&2
     exit 1
