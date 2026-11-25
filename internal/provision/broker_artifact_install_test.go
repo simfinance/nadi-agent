@@ -243,7 +243,6 @@ func TestVerifyBrokerArtifactDirectoriesRejectsSymlinkAncestor(t *testing.T) {
 	}
 }
 
-
 func TestInstallBrokerArtifactsJournaledRollsBackWhenDropInAncestorIsSymlinked(t *testing.T) {
 	base := t.TempDir()
 	root := filepath.Join(base, "root")
