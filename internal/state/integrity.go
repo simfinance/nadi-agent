@@ -17,31 +17,31 @@ import (
 
 const integrityKeyFilename = "state-integrity-private.pem"
 
-func loadOrCreateIntegrityKey(directory string) (ed25519.PrivateKey, error) {
+func loadOrCreateIntegrityKey(directory string) (ed25519.PrivateKey, bool, error) {
 	key, err := loadExistingIntegrityKey(directory)
 	if err == nil {
-		return key, nil
+		return key, false, nil
 	}
 
 	if !errors.Is(err, os.ErrNotExist) {
-		return nil, err
+		return nil, false, err
 	}
 
 	statePath := filepath.Join(directory, "state.json")
 	if _, statErr := os.Lstat(statePath); statErr == nil {
-		return nil, errors.New("Agent state exists but its integrity key is missing; recovery is required")
+		return nil, false, errors.New("Agent state exists but its integrity key is missing; recovery is required")
 	} else if !errors.Is(statErr, os.ErrNotExist) {
-		return nil, fmt.Errorf("inspect existing Agent state: %w", statErr)
+		return nil, false, fmt.Errorf("inspect existing Agent state: %w", statErr)
 	}
 
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, fmt.Errorf("generate Ed25519 state integrity key: %w", err)
+		return nil, false, fmt.Errorf("generate Ed25519 state integrity key: %w", err)
 	}
 
 	der, err := x509.MarshalPKCS8PrivateKey(privateKey)
 	if err != nil {
-		return nil, fmt.Errorf("encode Ed25519 state integrity key: %w", err)
+		return nil, false, fmt.Errorf("encode Ed25519 state integrity key: %w", err)
 	}
 
 	content := pem.EncodeToMemory(&pem.Block{
@@ -51,35 +51,35 @@ func loadOrCreateIntegrityKey(directory string) (ed25519.PrivateKey, error) {
 	path := filepath.Join(directory, integrityKeyFilename)
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
-		return nil, fmt.Errorf("create Agent state integrity key: %w", err)
+		return nil, false, fmt.Errorf("create Agent state integrity key: %w", err)
 	}
 
 	if _, err := file.Write(content); err != nil {
 		file.Close()
 		os.Remove(path)
-		return nil, fmt.Errorf("write Agent state integrity key: %w", err)
+		return nil, false, fmt.Errorf("write Agent state integrity key: %w", err)
 	}
 	if err := file.Sync(); err != nil {
 		file.Close()
 		os.Remove(path)
-		return nil, fmt.Errorf("sync Agent state integrity key: %w", err)
+		return nil, false, fmt.Errorf("sync Agent state integrity key: %w", err)
 	}
 	if err := file.Close(); err != nil {
 		os.Remove(path)
-		return nil, fmt.Errorf("close Agent state integrity key: %w", err)
+		return nil, false, fmt.Errorf("close Agent state integrity key: %w", err)
 	}
 
 	directoryFile, err := os.Open(directory)
 	if err != nil {
-		return nil, fmt.Errorf("open state directory for key sync: %w", err)
+		return nil, false, fmt.Errorf("open state directory for key sync: %w", err)
 	}
 	defer directoryFile.Close()
 
 	if err := directoryFile.Sync(); err != nil {
-		return nil, fmt.Errorf("sync state directory after key creation: %w", err)
+		return nil, false, fmt.Errorf("sync state directory after key creation: %w", err)
 	}
 
-	return privateKey, nil
+	return privateKey, true, nil
 }
 
 func loadExistingIntegrityKey(directory string) (ed25519.PrivateKey, error) {
