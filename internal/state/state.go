@@ -114,6 +114,12 @@ func Open(directory string) (*Store, error) {
 	}
 
 	lockPath := filepath.Join(directory, "agent.lock")
+	_, lockStatErr := os.Lstat(lockPath)
+	existingInstallMarker := lockStatErr == nil
+	if lockStatErr != nil && !errors.Is(lockStatErr, os.ErrNotExist) {
+		return nil, fmt.Errorf("inspect Agent installation marker: %w", lockStatErr)
+	}
+
 	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("open agent lock: %w", err)
@@ -129,7 +135,7 @@ func Open(directory string) (*Store, error) {
 		return nil, fmt.Errorf("another NADI Agent process may already be running: %w", err)
 	}
 
-	privateKey, freshInstall, err := loadOrCreateIntegrityKey(directory)
+	privateKey, freshInstall, err := loadOrCreateIntegrityKey(directory, existingInstallMarker)
 	if err != nil {
 		syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
 		lockFile.Close()
