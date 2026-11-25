@@ -852,7 +852,6 @@ func runAgentIdentityVerification(identity helperRuntimeIdentity) ([]byte, error
 	return summary, nil
 }
 
-
 func recoverEnrollmentJournal(inventory provisionInventory) error {
 	store, journal, err := openProvisionJournal(provisionJournalPath)
 	if err != nil {

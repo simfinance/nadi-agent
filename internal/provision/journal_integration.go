@@ -399,7 +399,6 @@ func removeProvisionJournal(store *provisionJournalStore, phase string) error {
 	return directory.Sync()
 }
 
-
 func verifyEnrollmentJournalActions(
 	journal *provisionJournal,
 	expectedTargets map[string]string,

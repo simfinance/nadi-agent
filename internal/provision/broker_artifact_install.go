@@ -295,7 +295,6 @@ func installBrokerArtifactsJournaledAt(
 	return nil
 }
 
-
 func expectedEnrollmentJournalTargets(config handoffbroker.Config) map[string]string {
 	targets := make(map[string]string)
 
