@@ -121,7 +121,6 @@ func TestValidateRejectsRelativeHandoffSocketPath(t *testing.T) {
 	}
 }
 
-
 func TestLoadUsesCanonicalStateDirectory(t *testing.T) {
 	t.Setenv("NADI_CENTRAL_URL", "https://central.example.test")
 	t.Setenv("NADI_STATE_DIR", "")
