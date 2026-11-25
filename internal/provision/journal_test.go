@@ -525,3 +525,114 @@ func TestProvisionJournalRollbackStopsBeforeRemovingEarlierResources(t *testing.
 		t.Fatalf("modified file action must remain applied, got %q", journal.Actions[fileIndex].State)
 	}
 }
+
+func TestEnrollmentJournalRecoveryMarksAmbiguousIntentWithoutClaimingOwnership(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "journal.json")
+	target := filepath.Join(directory, "bridge-mapping.json")
+	content := []byte("matching Bridge mapping")
+
+	store, journal, err := newProvisionJournalForOperation(journalPath, "enroll_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AddIntent(&journal, "file", target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, content, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := reconcileEnrollmentJournalActions(store, &journal, map[string]string{
+		target: "file",
+	}); err != nil {
+		t.Fatalf("reconcile ambiguous intent: %v", err)
+	}
+	if journal.Actions[0].State != "rolled_back" || journal.Actions[0].Fingerprint != nil {
+		t.Fatalf("ambiguous intent must be skipped without claiming resource ownership: %#v", journal.Actions[0])
+	}
+	actual, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("ambiguous resource must be preserved: %v", err)
+	}
+	if string(actual) != string(content) {
+		t.Fatalf("ambiguous resource was modified: %q", actual)
+	}
+}
+
+func TestEnrollmentJournalRecoveryMarksMissingIntentBeforeRecreation(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "journal.json")
+	target := filepath.Join(directory, "bridge-mapping.json")
+
+	store, journal, err := newProvisionJournalForOperation(journalPath, "enroll_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AddIntent(&journal, "file", target); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := reconcileEnrollmentJournalActions(store, &journal, map[string]string{
+		target: "file",
+	}); err != nil {
+		t.Fatalf("reconcile missing intent: %v", err)
+	}
+	if journal.Actions[0].State != "rolled_back" {
+		t.Fatalf("missing intent was not safely marked skipped: %#v", journal.Actions[0])
+	}
+}
+
+func TestEnrollmentJournalRecoveryRequiresMatchingAppliedFingerprint(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "journal.json")
+	target := filepath.Join(directory, "bridge-mapping.json")
+
+	store, journal, err := newProvisionJournalForOperation(journalPath, "enroll_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	index, err := store.AddIntent(&journal, "file", target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("original Bridge mapping"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkApplied(&journal, index); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := verifyEnrollmentJournalActions(&journal, map[string]string{
+		target: "file",
+	}); err != nil {
+		t.Fatalf("matching applied fingerprint should be accepted: %v", err)
+	}
+
+	if err := os.WriteFile(target, []byte("modified Bridge mapping"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyEnrollmentJournalActions(&journal, map[string]string{
+		target: "file",
+	}); err == nil {
+		t.Fatal("modified applied resource must fail closed")
+	}
+}
+
+func TestEnrollmentJournalRecoveryRejectsUnexpectedTarget(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "journal.json")
+	target := filepath.Join(directory, "unexpected-file")
+
+	store, journal, err := newProvisionJournalForOperation(journalPath, "enroll_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AddIntent(&journal, "file", target); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := reconcileEnrollmentJournalActions(store, &journal, map[string]string{}); err == nil {
+		t.Fatal("recovery must reject journal targets outside the expected Bridge artifact set")
+	}
+}

@@ -399,6 +399,70 @@ func removeProvisionJournal(store *provisionJournalStore, phase string) error {
 	return directory.Sync()
 }
 
+
+func verifyEnrollmentJournalActions(
+	journal *provisionJournal,
+	expectedTargets map[string]string,
+) error {
+	if journal == nil || journal.Operation != "enroll_agent" {
+		return errors.New("enrollment journal is required")
+	}
+
+	for index, action := range journal.Actions {
+		expectedKind, exists := expectedTargets[action.Target]
+		if !exists || expectedKind != action.Kind {
+			return fmt.Errorf("enrollment journal action %d targets an unexpected resource", index)
+		}
+
+		switch action.State {
+		case "applied":
+			if action.Fingerprint == nil {
+				return fmt.Errorf("enrollment journal action %d has no persisted fingerprint", index)
+			}
+			current, err := fingerprintProvisionResource(action.Kind, action.Target)
+			if err != nil {
+				return fmt.Errorf("inspect enrollment journal action %d: %w", index, err)
+			}
+			if current != *action.Fingerprint {
+				return fmt.Errorf("enrollment journal action %d no longer matches its transaction fingerprint", index)
+			}
+		case "rolled_back":
+			if action.Fingerprint != nil {
+				return fmt.Errorf("enrollment journal action %d has an invalid skipped fingerprint", index)
+			}
+		default:
+			return fmt.Errorf("enrollment journal action %d is not in a recoverable state", index)
+		}
+	}
+
+	return nil
+}
+
+func reconcileEnrollmentJournalActions(
+	store *provisionJournalStore,
+	journal *provisionJournal,
+	expectedTargets map[string]string,
+) error {
+	if store == nil || journal == nil || journal.Operation != "enroll_agent" {
+		return errors.New("enrollment journal store and journal are required")
+	}
+
+	for index := range journal.Actions {
+		action := &journal.Actions[index]
+		expectedKind, exists := expectedTargets[action.Target]
+		if !exists || expectedKind != action.Kind {
+			return fmt.Errorf("enrollment journal action %d targets an unexpected resource", index)
+		}
+		if action.State == "intent" {
+			if err := store.MarkSkipped(journal, index); err != nil {
+				return fmt.Errorf("preserve ambiguous enrollment intent %d: %w", index, err)
+			}
+		}
+	}
+
+	return verifyEnrollmentJournalActions(journal, expectedTargets)
+}
+
 func recoverProvisionJournalForInstall(
 	releaseVersion string,
 	artifactSHA256 string,

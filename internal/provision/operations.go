@@ -501,27 +501,47 @@ func decodeEnrollmentIdentitySummary(summaryJSON []byte) (provisionCompletion, e
 	}, nil
 }
 
+func verifyAgentIdentitySummary(
+	applications []ProvisionApplication,
+	artifactSHA256 string,
+) (helperRuntimeIdentity, []byte, provisionCompletion, error) {
+	identity, err := ensureAgentAccount()
+	if err != nil {
+		return helperRuntimeIdentity{}, nil, provisionCompletion{}, fmt.Errorf("verify dedicated Agent runtime account: %w", err)
+	}
+	if err := verifyAgentStateFile(); err != nil {
+		return helperRuntimeIdentity{}, nil, provisionCompletion{}, err
+	}
+	if err := verifyInstalledAgentBinaryDigest(artifactSHA256); err != nil {
+		return helperRuntimeIdentity{}, nil, provisionCompletion{}, err
+	}
+
+	summaryJSON, err := runAgentIdentityVerification(identity)
+	if err != nil {
+		return helperRuntimeIdentity{}, nil, provisionCompletion{}, err
+	}
+	identityRecord, err := decodeEnrollmentIdentitySummary(summaryJSON)
+	if err != nil {
+		return helperRuntimeIdentity{}, nil, provisionCompletion{}, err
+	}
+	if _, _, _, err := BuildBrokerArtifacts(
+		uint32(identity.uid),
+		uint32(identity.gid),
+		ProvisionRequest{Applications: applications},
+		summaryJSON,
+	); err != nil {
+		return helperRuntimeIdentity{}, nil, provisionCompletion{}, fmt.Errorf("verify existing enrollment application identity: %w", err)
+	}
+
+	return identity, summaryJSON, identityRecord, nil
+}
+
 func verifyExistingEnrollmentIdentity(
 	applications []ProvisionApplication,
 	artifactSHA256 string,
 	completion provisionCompletion,
 ) error {
-	identity, err := ensureAgentAccount()
-	if err != nil {
-		return fmt.Errorf("verify dedicated Agent runtime account: %w", err)
-	}
-	if err := verifyAgentStateFile(); err != nil {
-		return err
-	}
-	if err := verifyInstalledAgentBinaryDigest(artifactSHA256); err != nil {
-		return err
-	}
-
-	summaryJSON, err := runAgentIdentityVerification(identity)
-	if err != nil {
-		return err
-	}
-	identityRecord, err := decodeEnrollmentIdentitySummary(summaryJSON)
+	identity, summaryJSON, identityRecord, err := verifyAgentIdentitySummary(applications, artifactSHA256)
 	if err != nil {
 		return err
 	}
@@ -530,6 +550,7 @@ func verifyExistingEnrollmentIdentity(
 		identityRecord.ServerID != completion.ServerID {
 		return errors.New("persisted Agent identity does not match the root-owned enrollment completion record")
 	}
+
 	_, expectedMapping, expectedDropIn, err := BuildBrokerArtifacts(
 		uint32(identity.uid),
 		uint32(identity.gid),
@@ -831,6 +852,146 @@ func runAgentIdentityVerification(identity helperRuntimeIdentity) ([]byte, error
 	return summary, nil
 }
 
+
+func recoverEnrollmentJournal(inventory provisionInventory) error {
+	store, journal, err := openProvisionJournal(provisionJournalPath)
+	if err != nil {
+		return fmt.Errorf("open enrollment transaction journal: %w", err)
+	}
+	if journal.Operation != "enroll_agent" {
+		return errors.New("journal does not describe an enrollment transaction")
+	}
+
+	attemptExists, err := hasProvisionEnrollmentAttempt()
+	if err != nil || !attemptExists {
+		return errors.New("enrollment attempt boundary is missing or invalid")
+	}
+
+	identity, summaryJSON, identityRecord, err := verifyAgentIdentitySummary(
+		inventory.Applications,
+		inventory.ArtifactSHA256,
+	)
+	if err != nil {
+		return fmt.Errorf("verify persisted Agent identity without creating a new identity: %w", err)
+	}
+
+	brokerConfig, mappingJSON, dropIn, err := BuildBrokerArtifacts(
+		uint32(identity.uid),
+		uint32(identity.gid),
+		ProvisionRequest{Applications: inventory.Applications},
+		summaryJSON,
+	)
+	if err != nil {
+		return fmt.Errorf("rebuild expected Bridge artifacts from verified Agent identity: %w", err)
+	}
+
+	expectedTargets := expectedEnrollmentJournalTargets(brokerConfig)
+	if journal.Phase == "committed" {
+		if err := verifyEnrollmentJournalActions(&journal, expectedTargets); err != nil {
+			return fmt.Errorf("verify committed enrollment journal: %w", err)
+		}
+		completion, err := readProvisionCompletion()
+		if err != nil {
+			return fmt.Errorf("committed enrollment journal has no valid completion record: %w", err)
+		}
+		if completion.AgentVersion != inventory.AgentVersion ||
+			completion.ApplicationCount != len(inventory.Applications) ||
+			completion.AgentInstanceID != identityRecord.AgentInstanceID ||
+			completion.AgentID != identityRecord.AgentID ||
+			completion.ServerID != identityRecord.ServerID {
+			return errors.New("committed enrollment completion does not match the verified Agent identity and inventory")
+		}
+		if err := verifyExistingEnrollmentIdentity(
+			inventory.Applications,
+			inventory.ArtifactSHA256,
+			completion,
+		); err != nil {
+			return fmt.Errorf("verify committed Bridge artifacts: %w", err)
+		}
+		if err := verifyBrokerArtifactDirectories(brokerConfig, string(os.PathSeparator), 0, 0); err != nil {
+			return fmt.Errorf("verify committed Bridge directories: %w", err)
+		}
+		return removeProvisionJournal(store, "committed")
+	}
+
+	if journal.Phase != "in_progress" {
+		return fmt.Errorf("enrollment journal phase %q cannot be recovered automatically", journal.Phase)
+	}
+	if err := reconcileEnrollmentJournalActions(store, &journal, expectedTargets); err != nil {
+		return fmt.Errorf("reconcile enrollment journal actions: %w", err)
+	}
+
+	completion, completionErr := readProvisionCompletion()
+	completionExists := completionErr == nil
+	if completionErr != nil && !errors.Is(completionErr, os.ErrNotExist) {
+		return fmt.Errorf("inspect existing enrollment completion metadata: %w", completionErr)
+	}
+	if completionExists &&
+		(completion.AgentVersion != inventory.AgentVersion ||
+			completion.ApplicationCount != len(inventory.Applications) ||
+			completion.AgentInstanceID != identityRecord.AgentInstanceID ||
+			completion.AgentID != identityRecord.AgentID ||
+			completion.ServerID != identityRecord.ServerID) {
+		return errors.New("existing enrollment completion metadata does not match the verified Agent identity")
+	}
+
+	if err := installBrokerArtifactsJournaled(
+		brokerConfig,
+		mappingJSON,
+		dropIn,
+		store,
+		&journal,
+	); err != nil {
+		return fmt.Errorf("reconcile Bridge mapping and systemd drop-in: %w", err)
+	}
+
+	if !completionExists {
+		completion = provisionCompletion{
+			ProtocolVersion:  1,
+			AgentVersion:     inventory.AgentVersion,
+			ApplicationCount: len(inventory.Applications),
+			EnrollmentStatus: "registered",
+			AgentInstanceID:  identityRecord.AgentInstanceID,
+			AgentID:          identityRecord.AgentID,
+			ServerID:         identityRecord.ServerID,
+		}
+		completionJSON, err := json.Marshal(completion)
+		if err != nil {
+			return errors.New("encode recovered enrollment completion metadata")
+		}
+		if err := installImmutableFileJournaled(
+			provisionCompletePath,
+			completionJSON,
+			0600,
+			0,
+			0,
+			store,
+			&journal,
+		); err != nil {
+			return fmt.Errorf("persist recovered enrollment completion metadata: %w", err)
+		}
+	}
+
+	if err := verifyExistingEnrollmentIdentity(
+		inventory.Applications,
+		inventory.ArtifactSHA256,
+		completion,
+	); err != nil {
+		return fmt.Errorf("verify recovered enrollment identity and Bridge artifacts: %w", err)
+	}
+	if err := verifyBrokerArtifactDirectories(brokerConfig, string(os.PathSeparator), 0, 0); err != nil {
+		return fmt.Errorf("verify recovered Bridge directories: %w", err)
+	}
+	if err := store.Commit(&journal); err != nil {
+		return fmt.Errorf("commit recovered enrollment transaction: %w", err)
+	}
+	if err := removeProvisionJournal(store, "committed"); err != nil {
+		return fmt.Errorf("recovered enrollment is committed but its journal could not be removed: %w", err)
+	}
+
+	return nil
+}
+
 func rejectPendingEnrollmentJournal(response *HelperResponse, writer io.Writer, errorWriter io.Writer) int {
 	metadata, err := os.Lstat(provisionJournalPath)
 	if errors.Is(err, os.ErrNotExist) {
@@ -857,10 +1018,21 @@ func rejectPendingEnrollmentJournal(response *HelperResponse, writer io.Writer, 
 		return writeOperationFailure(writer, errorWriter, *response, errors.New("another provisioning transaction requires recovery before enrollment or service activation"))
 	}
 
-	response.Phase = "recovery_required"
-	response.EnrollmentStatus = "unknown"
-	response.RetrySafe = false
-	return writeOperationFailure(writer, errorWriter, *response, errors.New("an enrollment transaction is still recorded; do not retry enrollment or start services until Central identity and Bridge artifacts are reconciled"))
+	inventory, err := readProvisionInventory()
+	if err != nil {
+		response.Phase = "recovery_required"
+		response.EnrollmentStatus = "unknown"
+		response.RetrySafe = false
+		return writeOperationFailure(writer, errorWriter, *response, errors.New("enrollment recovery requires a valid installed application inventory"))
+	}
+	if err := recoverEnrollmentJournal(inventory); err != nil {
+		response.Phase = "recovery_required"
+		response.EnrollmentStatus = "unknown"
+		response.RetrySafe = false
+		return writeOperationFailure(writer, errorWriter, *response, fmt.Errorf("enrollment recovery failed; preserve Agent identity and journal without retrying enrollment: %w", err))
+	}
+
+	return 0
 }
 
 func runEnrollAgentOperation(request ProvisionOperationRequest, response HelperResponse, writer io.Writer, errorWriter io.Writer) int {
@@ -980,6 +1152,14 @@ func runEnrollAgentOperation(request ProvisionOperationRequest, response HelperR
 		return writeOperationFailure(writer, errorWriter, response, errors.New("persist enrollment attempt boundary; enrollment was not started"))
 	}
 
+	journalStore, journal, err := newProvisionJournalForOperation(provisionJournalPath, "enroll_agent")
+	if err != nil {
+		response.Phase = "recovery_required"
+		response.EnrollmentStatus = "not_started"
+		response.RetrySafe = false
+		return writeOperationFailure(writer, errorWriter, response, fmt.Errorf("persist enrollment transaction journal before Central enrollment; enrollment was not started: %w", err))
+	}
+
 	response.Phase = "enrollment"
 	response.EnrollmentStatus = "unknown"
 	response.RetrySafe = false
@@ -1014,13 +1194,6 @@ func runEnrollAgentOperation(request ProvisionOperationRequest, response HelperR
 	)
 	if err != nil {
 		response.Message = "Central enrollment succeeded, but broker configuration could not be prepared. Preserve Agent state; do not repeat enrollment."
-		writeHelperResponse(writer, response)
-		fmt.Fprintln(errorWriter, response.Message)
-		return 1
-	}
-	journalStore, journal, err := newProvisionJournalForOperation(provisionJournalPath, "enroll_agent")
-	if err != nil {
-		response.Message = "Central enrollment succeeded, but the Bridge transaction journal could not be created. Preserve Agent state; do not repeat enrollment."
 		writeHelperResponse(writer, response)
 		fmt.Fprintln(errorWriter, response.Message)
 		return 1

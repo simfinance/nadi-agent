@@ -295,6 +295,77 @@ func installBrokerArtifactsJournaledAt(
 	return nil
 }
 
+
+func expectedEnrollmentJournalTargets(config handoffbroker.Config) map[string]string {
+	targets := make(map[string]string)
+
+	addDirectoryTree := func(directory string) {
+		for current := directory; current != string(os.PathSeparator); current = filepath.Dir(current) {
+			targets[current] = "directory"
+		}
+	}
+
+	addDirectoryTree("/var/lib/nadi-bridge")
+	for _, application := range config.Applications {
+		addDirectoryTree(filepath.Join("/var/lib/nadi-bridge", application.ApplicationID))
+	}
+	addDirectoryTree(filepath.Dir(brokerMappingPath))
+	addDirectoryTree(filepath.Dir(brokerDropInPath))
+
+	targets[brokerMappingPath] = "file"
+	targets[brokerDropInPath] = "file"
+	targets[provisionCompletePath] = "file"
+
+	return targets
+}
+
+func verifyBrokerArtifactDirectories(
+	config handoffbroker.Config,
+	root string,
+	ownerUID int,
+	ownerGID int,
+) error {
+	if root == "" || !filepath.IsAbs(root) || filepath.Clean(root) != root {
+		return errors.New("Bridge verification root must be absolute and canonical")
+	}
+
+	directories := []struct {
+		path string
+		mode os.FileMode
+	}{
+		{path: filepath.Join(root, "var", "lib", "nadi-bridge"), mode: bridgeDirectoryMode},
+		{path: filepath.Join(root, "etc", "nadi"), mode: nadiConfigDirectoryMode},
+		{path: filepath.Join(root, "etc", "systemd", "system", "nadi-handoff-broker.service.d"), mode: systemDirectoryMode},
+	}
+	for _, application := range config.Applications {
+		directories = append(directories, struct {
+			path string
+			mode os.FileMode
+		}{
+			path: filepath.Join(root, "var", "lib", "nadi-bridge", application.ApplicationID),
+			mode: bridgeDirectoryMode,
+		})
+	}
+
+	for _, directory := range directories {
+		metadata, err := os.Lstat(directory.path)
+		if err != nil {
+			return fmt.Errorf("inspect Bridge directory %s: %w", directory.path, err)
+		}
+		stat, ok := metadata.Sys().(*syscall.Stat_t)
+		if !ok ||
+			metadata.Mode()&os.ModeSymlink != 0 ||
+			!metadata.IsDir() ||
+			int(stat.Uid) != ownerUID ||
+			int(stat.Gid) != ownerGID ||
+			metadata.Mode().Perm() != directory.mode {
+			return fmt.Errorf("Bridge directory %s has unexpected type, ownership, or permissions", directory.path)
+		}
+	}
+
+	return nil
+}
+
 func encodeBrokerMapping(config handoffbroker.Config) ([]byte, error) {
 	if _, err := handoffbroker.NewServer(
 		"/run/nadi/credential-handoff.sock",
