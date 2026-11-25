@@ -184,3 +184,117 @@ func TestDecodeEnrollmentIdentitySummaryRejectsIncompleteIdentity(t *testing.T) 
 		t.Fatal("incomplete Central identity must be rejected")
 	}
 }
+
+
+func TestReconcileRestoreMetadataPreservesVerifiedRecords(t *testing.T) {
+	applications := []ProvisionApplication{
+		{
+			ApplicationKey: "application-one",
+			BasePath:       "/srv/application-one",
+			RuntimeUID:     1001,
+			RuntimeGID:     1001,
+		},
+	}
+	identity := provisionCompletion{
+		EnrollmentStatus: "registered",
+		AgentInstanceID:  "agent-instance-one",
+		AgentID:          "central-agent-one",
+		ServerID:         "central-server-one",
+	}
+	completion := provisionCompletion{
+		ProtocolVersion:  1,
+		AgentVersion:     "1.2.3",
+		ApplicationCount: 1,
+		EnrollmentStatus: "registered",
+		AgentInstanceID:  identity.AgentInstanceID,
+		AgentID:          identity.AgentID,
+		ServerID:         identity.ServerID,
+	}
+	inventory := provisionInventory{
+		ProtocolVersion: 1,
+		AgentVersion:    "1.2.3",
+		ArtifactSHA256:  strings.Repeat("a", 64),
+		Applications:    applications,
+	}
+
+	tests := []struct {
+		name                string
+		completion          *provisionCompletion
+		inventory           *provisionInventory
+		wantCompletionWrite bool
+		wantInventoryWrite  bool
+		wantError           bool
+	}{
+		{
+			name:       "preserve both verified records",
+			completion: &completion,
+			inventory:  &inventory,
+		},
+		{
+			name:                "create only missing completion",
+			inventory:           &inventory,
+			wantCompletionWrite: true,
+		},
+		{
+			name:               "create only missing inventory",
+			completion:         &completion,
+			wantInventoryWrite: true,
+		},
+		{
+			name:       "reject Agent instance mismatch",
+			completion: func() *provisionCompletion { value := completion; value.AgentInstanceID = "different"; return &value }(),
+			inventory:  &inventory,
+			wantError:  true,
+		},
+		{
+			name:       "reject release version mismatch",
+			completion: func() *provisionCompletion { value := completion; value.AgentVersion = "9.9.9"; return &value }(),
+			inventory:  &inventory,
+			wantError:  true,
+		},
+		{
+			name:       "reject application count mismatch",
+			completion: func() *provisionCompletion { value := completion; value.ApplicationCount = 2; return &value }(),
+			inventory:  &inventory,
+			wantError:  true,
+		},
+		{
+			name:       "reject artifact digest mismatch",
+			completion: &completion,
+			inventory:  func() *provisionInventory { value := inventory; value.ArtifactSHA256 = strings.Repeat("b", 64); return &value }(),
+			wantError:  true,
+		},
+		{
+			name:       "reject application inventory mismatch",
+			completion: &completion,
+			inventory:  func() *provisionInventory { value := inventory; value.Applications = nil; return &value }(),
+			wantError:  true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			completionWrite, inventoryWrite, err := reconcileRestoreMetadata(
+				test.completion,
+				test.inventory,
+				identity,
+				"1.2.3",
+				strings.Repeat("a", 64),
+				applications,
+			)
+
+			if (err != nil) != test.wantError {
+				t.Fatalf("unexpected error state: %v", err)
+			}
+			if err != nil {
+				return
+			}
+			if completionWrite == !test.wantCompletionWrite {
+				t.Fatalf("completion write decision = %t, want %t", !test.wantCompletionWrite, completionWrite)
+			}
+			if inventoryWrite == !test.wantInventoryWrite {
+				t.Fatalf("inventory write decision = %t, want %t", !test.wantInventoryWrite, inventoryWrite)
+			}
+		})
+	}
+}
