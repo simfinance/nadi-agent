@@ -93,6 +93,9 @@ func prepareAgentDirectoriesJournaled(
 		{path: "/etc/nadi", mode: 0750, uid: 0, gid: 0},
 		{path: "/etc/nadi/keys", mode: 0750, uid: 0, gid: 0},
 		{path: "/var/lib/nadi", mode: 0700, uid: identity.uid, gid: identity.gid},
+		{path: "/var/lib/nadi/state", mode: 0700, uid: identity.uid, gid: identity.gid},
+		{path: "/var/lib/nadi/spool", mode: 0700, uid: identity.uid, gid: identity.gid},
+		{path: "/var/lib/nadi/engines", mode: 0700, uid: identity.uid, gid: identity.gid},
 		{path: "/var/log/nadi", mode: 0750, uid: identity.uid, gid: identity.gid},
 		{path: "/run/nadi", mode: 0755, uid: 0, gid: 0},
 	}
