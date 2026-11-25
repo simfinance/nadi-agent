@@ -225,19 +225,21 @@ func TestReconcileRestoreMetadataPreservesVerifiedRecords(t *testing.T) {
 		wantError            bool
 	}{
 		{
-			name:       "preserve both verified records",
-			completion: &completion,
-			inventory:  &inventory,
+			name:                 "preserve both verified records",
+			completion:           &completion,
+			inventory:            &inventory,
+			wantCompletionExists: true,
+			wantInventoryExists:  true,
 		},
 		{
 			name:                 "create only missing completion",
 			inventory:            &inventory,
-			wantCompletionExists: true,
+			wantInventoryExists:  true,
 		},
 		{
-			name:                "create only missing inventory",
-			completion:          &completion,
-			wantInventoryExists: true,
+			name:                 "create only missing inventory",
+			completion:           &completion,
+			wantCompletionExists: true,
 		},
 		{
 			name:       "reject Agent instance mismatch",
