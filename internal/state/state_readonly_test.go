@@ -77,7 +77,6 @@ func TestLoadReadOnlyRejectsInsecureStateFileMode(t *testing.T) {
 	}
 }
 
-
 func TestLoadReadOnlyRejectsLegacyPersistentDataLayout(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "nadi")
 	if err := os.MkdirAll(root, 0700); err != nil {

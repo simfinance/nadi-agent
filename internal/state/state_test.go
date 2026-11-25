@@ -102,7 +102,6 @@ func TestStorePreventsConcurrentAgentProcess(t *testing.T) {
 	}
 }
 
-
 func TestOpenRejectsLegacyPersistentDataBeforeCreatingCanonicalState(t *testing.T) {
 	legacyArtifacts := []string{
 		"state.json",

@@ -392,7 +392,6 @@ func (s *Store) Close() error {
 	return nil
 }
 
-
 func rejectLegacyStateLayout(directory string) error {
 	if filepath.Base(directory) != "state" || filepath.Base(filepath.Dir(directory)) != "nadi" {
 		return nil
