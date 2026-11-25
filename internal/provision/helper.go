@@ -26,8 +26,8 @@ import (
 const (
 	agentAccountName        = "nadi-agent"
 	agentBinaryPath         = "/opt/nadi/bin/nadi-agent"
-	agentStateDirectory     = "/var/lib/nadi"
-	agentStateFile          = "/var/lib/nadi/state.json"
+	agentStateDirectory     = "/var/lib/nadi/state"
+	agentStateFile          = "/var/lib/nadi/state/state.json"
 	agentManifestPath       = "/etc/nadi/applications.json"
 	agentUnitPath           = "/etc/systemd/system/nadi-agent.service"
 	brokerUnitPath          = "/etc/systemd/system/nadi-handoff-broker.service"
@@ -486,6 +486,9 @@ func prepareAgentDirectories(identity helperRuntimeIdentity) error {
 		{path: "/etc/nadi", mode: 0750, uid: 0, gid: 0},
 		{path: "/etc/nadi/keys", mode: 0750, uid: 0, gid: 0},
 		{path: "/var/lib/nadi", mode: 0700, uid: identity.uid, gid: identity.gid},
+		{path: "/var/lib/nadi/state", mode: 0700, uid: identity.uid, gid: identity.gid},
+		{path: "/var/lib/nadi/spool", mode: 0700, uid: identity.uid, gid: identity.gid},
+		{path: "/var/lib/nadi/engines", mode: 0700, uid: identity.uid, gid: identity.gid},
 		{path: "/var/log/nadi", mode: 0750, uid: identity.uid, gid: identity.gid},
 		{path: "/run/nadi", mode: 0755, uid: 0, gid: 0},
 	}
