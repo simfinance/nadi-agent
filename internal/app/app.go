@@ -42,7 +42,7 @@ type App struct {
 func New(cfg config.Config, logger *slog.Logger) *App {
 	socketPath := cfg.HandoffSocketPath
 	if socketPath == "" {
-		socketPath = "/run/nadi-agent/credential-handoff.sock"
+		socketPath = "/run/nadi/credential-handoff.sock"
 	}
 
 	handoffClient, _ := handoff.NewClient(socketPath, 2*time.Second)
@@ -68,13 +68,13 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	defer store.Close()
 
-	telemetrySpool, err := spool.Open(filepath.Join(a.config.StateDir, "spool"), spool.DefaultMaxBytes, spool.DefaultMaxRecords)
+	telemetrySpool, err := spool.Open(filepath.Join(filepath.Dir(a.config.StateDir), "spool"), spool.DefaultMaxBytes, spool.DefaultMaxRecords)
 	if err != nil {
 		return fmt.Errorf("initialize telemetry spool: %w", err)
 	}
 	a.telemetrySpool = telemetrySpool
 
-	applicationSpool, err := appspool.Open(filepath.Join(a.config.StateDir, "spool", "applications"), appspool.DefaultMaxBytes, appspool.DefaultMaxRecords)
+	applicationSpool, err := appspool.Open(filepath.Join(filepath.Dir(a.config.StateDir), "spool", "applications"), appspool.DefaultMaxBytes, appspool.DefaultMaxRecords)
 	if err != nil {
 		return fmt.Errorf("initialize per-application telemetry spool: %w", err)
 	}
@@ -103,7 +103,7 @@ func (a *App) Run(ctx context.Context) error {
 
 	telemetrySender, err := telemetry.NewSender(
 		a.config.CentralURL,
-		filepath.Join(a.config.StateDir, "telemetry-delivery"),
+		filepath.Join(filepath.Dir(a.config.StateDir), "spool", "telemetry-delivery"),
 		a.config.HTTPTimeout,
 	)
 	if err != nil {
