@@ -120,11 +120,8 @@ func (v *Verifier) Verify(grant control.ActivationGrant, application control.App
 	if err != nil {
 		return payload, fmt.Errorf("Activation Grant expires_at is invalid: %w", err)
 	}
-	if issuedAt.After(now.Add(maximumClockSkew)) {
-		return payload, errors.New("Activation Grant issued_at is in the future")
-	}
-	if !expiresAt.After(now) {
-		return payload, errors.New("Activation Grant has expired")
+	if err := validateGrantTimes(issuedAt, expiresAt, now); err != nil {
+		return payload, err
 	}
 
 	// The envelope expires_at is not part of the signed payload and Central may
@@ -147,6 +144,21 @@ func (v *Verifier) Verify(grant control.ActivationGrant, application control.App
 	}
 
 	return payload, nil
+}
+
+
+func validateGrantTimes(issuedAt time.Time, expiresAt time.Time, now time.Time) error {
+	if issuedAt.After(now.Add(maximumClockSkew)) {
+		return errors.New("Activation Grant issued_at is in the future")
+	}
+	if !expiresAt.After(issuedAt) {
+		return errors.New("Activation Grant expires_at must be later than issued_at")
+	}
+	if !expiresAt.After(now) {
+		return errors.New("Activation Grant has expired")
+	}
+
+	return nil
 }
 
 func registrationID(agentState state.State, applicationID string) string {
