@@ -95,6 +95,7 @@ type Store struct {
 	directory  string
 	lockFile   *os.File
 	privateKey []byte
+	freshInstall bool
 	mutex      sync.Mutex
 	closed     bool
 }
@@ -128,7 +129,7 @@ func Open(directory string) (*Store, error) {
 		return nil, fmt.Errorf("another NADI Agent process may already be running: %w", err)
 	}
 
-	privateKey, err := loadOrCreateIntegrityKey(directory)
+	privateKey, freshInstall, err := loadOrCreateIntegrityKey(directory)
 	if err != nil {
 		syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
 		lockFile.Close()
@@ -138,8 +139,16 @@ func Open(directory string) (*Store, error) {
 	return &Store{
 		directory:  directory,
 		lockFile:   lockFile,
-		privateKey: privateKey,
+		privateKey:  privateKey,
+		freshInstall: freshInstall,
 	}, nil
+}
+
+func (s *Store) IsFreshInstallation() bool {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	return !s.closed && s.freshInstall
 }
 
 func (s *Store) Load() (State, error) {
