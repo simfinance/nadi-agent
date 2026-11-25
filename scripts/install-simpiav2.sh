@@ -6,9 +6,11 @@ BINARY_SOURCE="${PACKAGE_ROOT}/bin/linux-amd64/nadi-agent"
 UNIT_SOURCE="${PACKAGE_ROOT}/systemd/nadi-agent.service"
 BINARY_TARGET="/opt/nadi/bin/nadi-agent"
 UNIT_TARGET="/etc/systemd/system/nadi-agent.service"
-ENV_TARGET="/etc/nadi-agent/agent.env"
-STATE_DIR="/var/lib/nadi-agent"
-KEY_FILE="/etc/nadi-agent/keys/activation-public.pem"
+ENV_TARGET="/etc/nadi/agent.env"
+STATE_DIR="/var/lib/nadi"
+KEY_FILE="/etc/nadi/keys/activation-public.pem"
+LEGACY_STATE_DIR="/var/lib/nadi-agent"
+LEGACY_CONFIG_DIR="/etc/nadi-agent"
 
 if [[ "$(id -u)" -ne 0 ]]; then
     echo "ERROR: jalankan script ini dengan sudo/root." >&2
@@ -17,6 +19,13 @@ fi
 
 if [[ "$(uname -m)" != "x86_64" ]]; then
     echo "ERROR: paket ini untuk Linux x86_64; arsitektur terdeteksi: $(uname -m)." >&2
+    exit 1
+fi
+
+if [[ -e "${LEGACY_STATE_DIR}" || -e "${LEGACY_CONFIG_DIR}" ]]; then
+    echo "ERROR: ditemukan direktori instalasi legacy NADI." >&2
+    echo "State/credential tidak dipindahkan otomatis karena prosedur migrasi belum ditetapkan." >&2
+    echo "Pertahankan seluruh data dan selesaikan recovery/migrasi identitas sebelum menjalankan installer ini." >&2
     exit 1
 fi
 
@@ -51,19 +60,19 @@ if [[ "${state_owner}" != "nadi-agent:nadi-agent" || "${state_mode}" != "600" ]]
 fi
 
 if ! id nadi-agent >/dev/null 2>&1; then
-    useradd --system --home-dir /var/lib/nadi-agent --shell /usr/sbin/nologin nadi-agent
+    useradd --system --home-dir /var/lib/nadi --shell /usr/sbin/nologin nadi-agent
 fi
 
 install -d -o root -g root -m 0755 /opt/nadi /opt/nadi/bin
-install -d -o root -g root -m 0755 /etc/nadi-agent
-install -d -o root -g root -m 0755 /etc/nadi-agent/keys
+install -d -o root -g root -m 0755 /etc/nadi
+install -d -o root -g root -m 0755 /etc/nadi/keys
 install -d -o nadi-agent -g nadi-agent -m 0700 "${STATE_DIR}"
 
 if [[ ! -e "${ENV_TARGET}" ]]; then
     cat > "${ENV_TARGET}" <<'ENVEOF'
 NADI_CENTRAL_URL=https://nadi.pesantrenalirsyad.org
-NADI_STATE_DIR=/var/lib/nadi-agent
-NADI_ACTIVATION_PUBLIC_KEY=/etc/nadi-agent/keys/activation-public.pem
+NADI_STATE_DIR=/var/lib/nadi
+NADI_ACTIVATION_PUBLIC_KEY=/etc/nadi/keys/activation-public.pem
 NADI_ACTIVATION_KEY_ID=nadi-central-2026-01
 NADI_LOG_LEVEL=info
 NADI_POLL_INTERVAL_SECONDS=30
