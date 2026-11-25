@@ -184,3 +184,45 @@ func TestVerifyReadOnlyRejectsIncompleteOrDuplicateApplicationIdentity(t *testin
 		})
 	}
 }
+
+func TestValidMachineID(t *testing.T) {
+	tests := []struct {
+		name      string
+		machineID string
+		valid     bool
+	}{
+		{
+			name:      "valid machine ID",
+			machineID: "0123456789abcdef0123456789abcdef",
+			valid:     true,
+		},
+		{
+			name:      "uppercase hexadecimal machine ID",
+			machineID: "0123456789ABCDEF0123456789ABCDEF",
+			valid:     true,
+		},
+		{
+			name:      "short machine ID",
+			machineID: "0123456789abcdef",
+			valid:     false,
+		},
+		{
+			name:      "non-hexadecimal machine ID",
+			machineID: "0123456789abcdef0123456789abcdefg",
+			valid:     false,
+		},
+		{
+			name:      "all-zero machine ID",
+			machineID: "00000000000000000000000000000000",
+			valid:     false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if actual := validMachineID(test.machineID); actual != test.valid {
+				t.Fatalf("validMachineID(%q) = %v, want %v", test.machineID, actual, test.valid)
+			}
+		})
+	}
+}
