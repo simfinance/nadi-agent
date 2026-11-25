@@ -621,13 +621,17 @@ func restoreExistingAgentIdentity(
 		return rollbackFailure(errors.New("existing enrollment completion metadata is unsafe or invalid; reconcile identity before RESTORE"))
 	}
 
-	if existingInventory, inventoryErr := readProvisionInventory(); inventoryErr == nil {
+	if _, inventoryStatErr := os.Lstat(provisionInventoryPath); inventoryStatErr == nil {
+		existingInventory, inventoryErr := readProvisionInventory()
+		if inventoryErr != nil {
+			return rollbackFailure(errors.New("existing provisioning inventory is unsafe or invalid; reconcile identity before RESTORE"))
+		}
 		if existingInventory.ArtifactSHA256 != artifactSHA256 ||
 			!sameApplicationInventory(existingInventory.Applications, request.Applications) {
 			return rollbackFailure(errors.New("RESTORE cannot replace the installed Agent release identity or application inventory"))
 		}
-	} else if !errors.Is(inventoryErr, os.ErrNotExist) {
-		return rollbackFailure(errors.New("existing provisioning inventory is unsafe or invalid; reconcile identity before RESTORE"))
+	} else if !errors.Is(inventoryStatErr, os.ErrNotExist) {
+		return rollbackFailure(errors.New("existing provisioning inventory cannot be safely inspected; reconcile identity before RESTORE"))
 	}
 
 	legacyRequest := ProvisionRequest{
