@@ -220,8 +220,8 @@ func TestReconcileRestoreMetadataPreservesVerifiedRecords(t *testing.T) {
 		name                string
 		completion          *provisionCompletion
 		inventory           *provisionInventory
-		wantCompletionWrite bool
-		wantInventoryWrite  bool
+		wantCompletionExists bool
+		wantInventoryExists  bool
 		wantError           bool
 	}{
 		{
@@ -232,12 +232,12 @@ func TestReconcileRestoreMetadataPreservesVerifiedRecords(t *testing.T) {
 		{
 			name:                "create only missing completion",
 			inventory:           &inventory,
-			wantCompletionWrite: true,
+			wantCompletionExists: true,
 		},
 		{
 			name:               "create only missing inventory",
 			completion:         &completion,
-			wantInventoryWrite: true,
+			wantInventoryExists: true,
 		},
 		{
 			name:       "reject Agent instance mismatch",
@@ -277,7 +277,7 @@ func TestReconcileRestoreMetadataPreservesVerifiedRecords(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			completionWrite, inventoryWrite, err := reconcileRestoreMetadata(
+			completionExists, inventoryExists, err := reconcileRestoreMetadata(
 				test.completion,
 				test.inventory,
 				identity,
@@ -292,11 +292,11 @@ func TestReconcileRestoreMetadataPreservesVerifiedRecords(t *testing.T) {
 			if err != nil {
 				return
 			}
-			if completionWrite != test.wantCompletionWrite {
-				t.Fatalf("completion write decision = %t, want %t", completionWrite, test.wantCompletionWrite)
+			if completionExists != test.wantCompletionExists {
+				t.Fatalf("completion exists = %t, want %t", completionExists, test.wantCompletionExists)
 			}
-			if inventoryWrite != test.wantInventoryWrite {
-				t.Fatalf("inventory write decision = %t, want %t", inventoryWrite, test.wantInventoryWrite)
+			if inventoryExists != test.wantInventoryExists {
+				t.Fatalf("inventory exists = %t, want %t", inventoryExists, test.wantInventoryExists)
 			}
 		})
 	}
