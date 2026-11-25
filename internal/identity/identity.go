@@ -124,11 +124,16 @@ func machineFingerprint() (string, error) {
 
 	for _, path := range paths {
 		machineID, err := readMachineID(path)
-		if err != nil || !validMachineID(machineID) {
+		if err != nil {
 			continue
 		}
 
-		digest := sha256.Sum256([]byte(machineID))
+		machineIDBytes, valid := decodeMachineID(machineID)
+		if !valid {
+			continue
+		}
+
+		digest := sha256.Sum256(machineIDBytes)
 		return hex.EncodeToString(digest[:]), nil
 	}
 
@@ -154,22 +159,27 @@ func readMachineID(path string) (string, error) {
 }
 
 func validMachineID(machineID string) bool {
+	_, valid := decodeMachineID(machineID)
+	return valid
+}
+
+func decodeMachineID(machineID string) ([]byte, bool) {
 	if len(machineID) != 32 {
-		return false
+		return nil, false
 	}
 
 	decoded, err := hex.DecodeString(machineID)
 	if err != nil || len(decoded) != 16 {
-		return false
+		return nil, false
 	}
 
 	for _, value := range decoded {
 		if value != 0 {
-			return true
+			return decoded, true
 		}
 	}
 
-	return false
+	return nil, false
 }
 
 func newUUID() (string, error) {
