@@ -35,7 +35,7 @@ Installer akan membuat/memastikan user `nadi-agent`, direktori standar kanonis, 
 
 Installer menggunakan layout ADR-0001: binary di `/opt/nadi/bin/`, konfigurasi di `/etc/nadi/`, state di `/var/lib/nadi/state/`, spool di `/var/lib/nadi/spool/`, engine di `/var/lib/nadi/engines/`, log di `/var/log/nadi/`, dan runtime socket di `/run/nadi/`. Installer sengaja **tidak** menjalankan atau mengaktifkan service.
 
-Jika direktori legacy `/var/lib/nadi-agent` atau `/etc/nadi-agent` masih ada, installer berhenti sebelum melakukan perubahan. Jangan menghapus atau memindahkan direktori tersebut secara manual. Prosedur migrasi/recovery harus menjaga state, integrity key, credential, ownership, permission, dan identitas Agent; prosedur rinci tersebut belum ditetapkan dalam spesifikasi.
+Jika direktori legacy `/var/lib/nadi-agent` atau `/etc/nadi-agent` masih ada, installer berhenti sebelum melakukan perubahan. Installer juga menolak artefak state lama di root `/var/lib/nadi`, termasuk `state.json`, `state-integrity-private.pem`, `agent.lock`, `log-dedupe`, `nginx-error-log-cursor.json`, dan `telemetry-delivery`. Agent Core memiliki guard yang sama agar tidak membuat identity/state baru ketika artefak lama terdeteksi. Jangan menghapus atau memindahkan data tersebut secara manual. Prosedur migrasi/recovery harus menjaga state, integrity key, credential, spool, ownership, permission, dan identitas Agent; prosedur rinci tersebut belum ditetapkan dalam spesifikasi.
 
 ## 3. Preflight state dan permission
 
