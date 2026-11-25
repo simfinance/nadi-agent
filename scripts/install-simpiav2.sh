@@ -11,6 +11,14 @@ STATE_DIR="/var/lib/nadi/state"
 KEY_FILE="/etc/nadi/keys/activation-public.pem"
 LEGACY_STATE_DIR="/var/lib/nadi-agent"
 LEGACY_CONFIG_DIR="/etc/nadi-agent"
+LEGACY_STATE_PATHS=(
+    "/var/lib/nadi/state.json"
+    "/var/lib/nadi/state-integrity-private.pem"
+    "/var/lib/nadi/agent.lock"
+    "/var/lib/nadi/log-dedupe"
+    "/var/lib/nadi/nginx-error-log-cursor.json"
+    "/var/lib/nadi/telemetry-delivery"
+)
 
 if [[ "$(id -u)" -ne 0 ]]; then
     echo "ERROR: jalankan script ini dengan sudo/root." >&2
@@ -28,6 +36,15 @@ if [[ -e "${LEGACY_STATE_DIR}" || -e "${LEGACY_CONFIG_DIR}" ]]; then
     echo "Pertahankan seluruh data dan selesaikan recovery/migrasi identitas sebelum menjalankan installer ini." >&2
     exit 1
 fi
+
+for legacy_path in "${LEGACY_STATE_PATHS[@]}"; do
+    if [[ -e "${legacy_path}" ]]; then
+        echo "ERROR: ditemukan data Agent pada layout state lama: ${legacy_path}" >&2
+        echo "Installer tidak membuat state baru atau memindahkan data lama secara otomatis." >&2
+        echo "Selesaikan recovery/migrasi identitas sebelum melanjutkan." >&2
+        exit 1
+    fi
+done
 
 if [[ ! -x "${BINARY_SOURCE}" ]]; then
     echo "ERROR: binary AMD64 tidak ditemukan: ${BINARY_SOURCE}" >&2
