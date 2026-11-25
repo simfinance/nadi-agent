@@ -135,7 +135,6 @@ func machineFingerprint() (string, error) {
 	return "", errors.New("stable machine ID not found; expected /etc/machine-id or /var/lib/dbus/machine-id")
 }
 
-
 func readMachineID(path string) (string, error) {
 	file, err := os.Open(path)
 	if err != nil {
