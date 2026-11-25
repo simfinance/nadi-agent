@@ -14,7 +14,7 @@ NADI Agent is designed to be installed once per server and to serve multiple Lar
 | Agent count | One Agent per server |
 | Application count | Multiple Laravel applications per Agent, subject to enrollment limit and per-app isolation |
 
-The Agent provisioning helper now checks host OS, architecture, Ubuntu distribution ID, and systemd availability before making provisioning changes. Unsupported platforms fail before the provisioning lock or filesystem mutations are attempted.
+The Agent provisioning helper checks host OS, architecture, Ubuntu distribution ID, and systemd availability before making provisioning changes. Unsupported platforms fail before the provisioning lock or filesystem mutations are attempted.
 
 This is provider-neutral: the server may be hosted by any infrastructure provider or belong to any customer environment, provided it meets the supported Ubuntu/systemd/architecture baseline and infrastructure prerequisites. It is not a claim of support for every operating system or Linux distribution.
 
@@ -31,7 +31,11 @@ php artisan nadi:install
 
 The Composer package must auto-register its service provider, routes, controllers, middleware, commands, and listeners. Developers must not be required to create monitoring routes/controllers manually or install Go, Python, Node.js, exporters, or other monitoring software.
 
-**Repository boundary:** this repository contains the Go Agent and its provisioning implementation. It does not currently contain the separately named Composer package nadi/laravel-agent. Therefore, the two-command Laravel installation experience is an approved target contract, not a completed or releasable capability of this repository yet.
+**Repository boundary:** the Composer package is maintained separately in [simfinance/nadi-laravel-agent](https://github.com/simfinance/nadi-laravel-agent); this Go repository contains the Agent and provisioning implementation, not the PHP package. The PHP package declares the Composer name `nadi/laravel-agent` and is distributed through the private NADI Composer repository. Its existence does not mean the end-to-end installer is complete: its current `nadi:install` command verifies and stages the signed release artifact, then deliberately stops because privileged provisioning and secure enrollment handoff are not yet connected.
+
+Private Composer repository discovery and authentication must be provisioned by the deployment administrator before `composer require`. Do not place Composer tokens in the application repository, `.env`, shell history, or application files. The exact Private Packagist organization slug and credentials must come from the authorized account; never guess them.
+
+The package's declared Illuminate constraints are broader than the approved pilot baseline. They must not be treated as a compatibility guarantee until the corresponding Laravel/PHP combinations pass the package test matrix.
 
 ## Server prerequisites
 
@@ -64,4 +68,4 @@ The installer must stop with a diagnosis if a prerequisite is missing. It must n
 
 ## Release readiness
 
-The platform preflight is not proof of a production release. A deployable release still requires signed/checksummed AMD64 and ARM64 artifacts, a published release manifest, the Composer Bridge package, installation/update/repair/uninstall tests, multi-application isolation tests, and live Agent-to-Central E2E validation. Do not install unsigned or unverified binaries.
+The platform preflight is not proof of a production release. A deployable release still requires signed/checksummed AMD64 and ARM64 artifacts, a published release manifest, a fully connected Composer Bridge installer and privileged provisioning adapter, installation/update/repair/uninstall tests, multi-application isolation tests, and live Agent-to-Central E2E validation. Do not install unsigned or unverified binaries.
