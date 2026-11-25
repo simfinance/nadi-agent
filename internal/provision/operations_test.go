@@ -217,12 +217,12 @@ func TestReconcileRestoreMetadataPreservesVerifiedRecords(t *testing.T) {
 	}
 
 	tests := []struct {
-		name                string
-		completion          *provisionCompletion
-		inventory           *provisionInventory
+		name                 string
+		completion           *provisionCompletion
+		inventory            *provisionInventory
 		wantCompletionExists bool
 		wantInventoryExists  bool
-		wantError           bool
+		wantError            bool
 	}{
 		{
 			name:       "preserve both verified records",
@@ -230,13 +230,13 @@ func TestReconcileRestoreMetadataPreservesVerifiedRecords(t *testing.T) {
 			inventory:  &inventory,
 		},
 		{
-			name:                "create only missing completion",
-			inventory:           &inventory,
+			name:                 "create only missing completion",
+			inventory:            &inventory,
 			wantCompletionExists: true,
 		},
 		{
-			name:               "create only missing inventory",
-			completion:         &completion,
+			name:                "create only missing inventory",
+			completion:          &completion,
 			wantInventoryExists: true,
 		},
 		{
