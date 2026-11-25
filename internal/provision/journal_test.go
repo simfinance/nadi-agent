@@ -267,10 +267,21 @@ func TestIdentityRestoreJournalRollsBackOnlyNewMetadataAndPreservesAgentState(t 
 	}
 }
 
-func TestProvisionJournalRejectsUnknownOperation(t *testing.T) {
-	_, _, err := newProvisionJournalForOperation(filepath.Join(t.TempDir(), "journal.json"), "enroll_agent")
-	if err == nil {
-		t.Fatal("journal must reject operations outside the internal install/restore transaction allowlist")
+func TestProvisionJournalAcceptsEnrollmentOperationButNeverRollsItBack(t *testing.T) {
+	directory := t.TempDir()
+	store, journal, err := newProvisionJournalForOperation(filepath.Join(directory, "journal.json"), "enroll_agent")
+	if err != nil {
+		t.Fatalf("create enrollment journal: %v", err)
+	}
+	if journal.Operation != "enroll_agent" {
+		t.Fatalf("unexpected journal operation %q", journal.Operation)
+	}
+	if err := store.Rollback(&journal, []string{directory}); err == nil {
+		t.Fatal("enrollment journal must never roll back because Central may already have accepted the Agent identity")
+	}
+
+	if _, _, err := newProvisionJournalForOperation(filepath.Join(t.TempDir(), "journal.json"), "unknown_operation"); err == nil {
+		t.Fatal("journal must reject unknown operations")
 	}
 }
 

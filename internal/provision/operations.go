@@ -831,7 +831,43 @@ func runAgentIdentityVerification(identity helperRuntimeIdentity) ([]byte, error
 	return summary, nil
 }
 
+func rejectPendingEnrollmentJournal(response *HelperResponse, writer io.Writer, errorWriter io.Writer) int {
+	metadata, err := os.Lstat(provisionJournalPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0
+	}
+	if err != nil || metadata.Mode()&os.ModeSymlink != 0 || !metadata.Mode().IsRegular() {
+		response.Phase = "recovery_required"
+		response.EnrollmentStatus = "unknown"
+		response.RetrySafe = false
+		return writeOperationFailure(writer, errorWriter, *response, errors.New("provisioning journal cannot be safely inspected; preserve Agent identity and reconcile before continuing"))
+	}
+
+	_, journal, err := openProvisionJournal(provisionJournalPath)
+	if err != nil {
+		response.Phase = "recovery_required"
+		response.EnrollmentStatus = "unknown"
+		response.RetrySafe = false
+		return writeOperationFailure(writer, errorWriter, *response, errors.New("provisioning journal is invalid or unverifiable; preserve Agent identity and reconcile before continuing"))
+	}
+	if journal.Operation != "enroll_agent" {
+		response.Phase = "recovery_required"
+		response.EnrollmentStatus = "unknown"
+		response.RetrySafe = false
+		return writeOperationFailure(writer, errorWriter, *response, errors.New("another provisioning transaction requires recovery before enrollment or service activation"))
+	}
+
+	response.Phase = "recovery_required"
+	response.EnrollmentStatus = "unknown"
+	response.RetrySafe = false
+	return writeOperationFailure(writer, errorWriter, *response, errors.New("an enrollment transaction is still recorded; do not retry enrollment or start services until Central identity and Bridge artifacts are reconciled"))
+}
+
 func runEnrollAgentOperation(request ProvisionOperationRequest, response HelperResponse, writer io.Writer, errorWriter io.Writer) int {
+	if code := rejectPendingEnrollmentJournal(&response, writer, errorWriter); code != 0 {
+		return code
+	}
+
 	inventory, err := readProvisionInventory()
 	if err != nil {
 		return writeOperationFailure(writer, errorWriter, response, err)
@@ -982,8 +1018,21 @@ func runEnrollAgentOperation(request ProvisionOperationRequest, response HelperR
 		fmt.Fprintln(errorWriter, response.Message)
 		return 1
 	}
-	if err := InstallBrokerArtifacts(brokerConfig, mappingJSON, dropIn); err != nil {
-		response.Message = "Central enrollment succeeded, but broker artifacts could not be installed. Preserve Agent state; do not repeat enrollment."
+	journalStore, journal, err := newProvisionJournalForOperation(provisionJournalPath, "enroll_agent")
+	if err != nil {
+		response.Message = "Central enrollment succeeded, but the Bridge transaction journal could not be created. Preserve Agent state; do not repeat enrollment."
+		writeHelperResponse(writer, response)
+		fmt.Fprintln(errorWriter, response.Message)
+		return 1
+	}
+	if err := installBrokerArtifactsJournaled(
+		brokerConfig,
+		mappingJSON,
+		dropIn,
+		journalStore,
+		&journal,
+	); err != nil {
+		response.Message = "Central enrollment succeeded, but Bridge artifact installation is incomplete. Preserve the enrollment journal and Agent state; do not repeat enrollment."
 		writeHelperResponse(writer, response)
 		fmt.Fprintln(errorWriter, response.Message)
 		return 1
@@ -1005,8 +1054,28 @@ func runEnrollAgentOperation(request ProvisionOperationRequest, response HelperR
 		fmt.Fprintln(errorWriter, response.Message)
 		return 1
 	}
-	if err := installImmutableFile(provisionCompletePath, completionJSON, 0600, 0, 0); err != nil {
-		response.Message = "Central enrollment succeeded, but the local completion record could not be installed. Preserve Agent state; do not repeat enrollment."
+	if err := installImmutableFileJournaled(
+		provisionCompletePath,
+		completionJSON,
+		0600,
+		0,
+		0,
+		journalStore,
+		&journal,
+	); err != nil {
+		response.Message = "Central enrollment succeeded, but the local completion record could not be installed. Preserve the enrollment journal and Agent state; do not repeat enrollment."
+		writeHelperResponse(writer, response)
+		fmt.Fprintln(errorWriter, response.Message)
+		return 1
+	}
+	if err := journalStore.Commit(&journal); err != nil {
+		response.Message = "Central enrollment succeeded, but the Bridge transaction could not be committed. Preserve the enrollment journal and Agent state; do not repeat enrollment."
+		writeHelperResponse(writer, response)
+		fmt.Fprintln(errorWriter, response.Message)
+		return 1
+	}
+	if err := removeProvisionJournal(journalStore, "committed"); err != nil {
+		response.Message = "Central enrollment and Bridge configuration completed, but the committed transaction journal could not be cleared. Preserve Agent state and reconcile before continuing."
 		writeHelperResponse(writer, response)
 		fmt.Fprintln(errorWriter, response.Message)
 		return 1
@@ -1023,6 +1092,10 @@ func runEnrollAgentOperation(request ProvisionOperationRequest, response HelperR
 }
 
 func runStartAgentOperation(response HelperResponse, writer io.Writer, errorWriter io.Writer) int {
+	if code := rejectPendingEnrollmentJournal(&response, writer, errorWriter); code != 0 {
+		return code
+	}
+
 	completion, err := readProvisionCompletion()
 	if err != nil {
 		response.Phase = "service_activation"

@@ -59,7 +59,7 @@ func newProvisionJournal(path string) (*provisionJournalStore, provisionJournal,
 }
 
 func newProvisionJournalForOperation(path string, operation string) (*provisionJournalStore, provisionJournal, error) {
-	if operation != "install_agent" && operation != "restore_agent" {
+	if operation != "install_agent" && operation != "restore_agent" && operation != "enroll_agent" {
 		return nil, provisionJournal{}, errors.New("unsupported provisioning journal operation")
 	}
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
@@ -304,7 +304,7 @@ func (s *provisionJournalStore) Save(journal provisionJournal) error {
 func validateProvisionJournal(journal provisionJournal) error {
 	if journal.ProtocolVersion != provisionJournalSchemaVersion ||
 		len(journal.TransactionID) != 32 ||
-		(journal.Operation != "install_agent" && journal.Operation != "restore_agent") ||
+		(journal.Operation != "install_agent" && journal.Operation != "restore_agent" && journal.Operation != "enroll_agent") ||
 		(journal.Phase != "in_progress" &&
 			journal.Phase != "rollback_required" &&
 			journal.Phase != "rolled_back" &&
@@ -529,6 +529,9 @@ func fingerprintProvisionResource(kind string, path string) (provisionJournalFin
 func (s *provisionJournalStore) Rollback(journal *provisionJournal, allowedRoots []string) error {
 	if journal == nil {
 		return errors.New("provisioning journal is required")
+	}
+	if journal.Operation == "enroll_agent" {
+		return errors.New("enrollment journal cannot be rolled back because Central may already have accepted the Agent identity")
 	}
 	if journal.Phase != "in_progress" && journal.Phase != "rollback_required" {
 		return errors.New("provisioning journal is not in a rollback-eligible phase")

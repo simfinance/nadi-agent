@@ -189,8 +189,8 @@ func installBrokerArtifactsJournaledAt(
 	if root == "" || !filepath.IsAbs(root) || filepath.Clean(root) != root {
 		return errors.New("artifact installation root must be absolute and canonical")
 	}
-	if store == nil || journal == nil || journal.Operation != "restore_agent" {
-		return errors.New("identity restore journal is required for broker artifact installation")
+	if store == nil || journal == nil || (journal.Operation != "restore_agent" && journal.Operation != "enroll_agent") {
+		return errors.New("identity restore or enrollment journal is required for broker artifact installation")
 	}
 
 	expectedMapping, err := encodeBrokerMapping(config)

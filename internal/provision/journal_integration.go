@@ -422,6 +422,9 @@ func recoverProvisionJournalForInstall(
 
 	switch journal.Phase {
 	case "committed":
+		if journal.Operation == "enroll_agent" {
+			return false, errors.New("a committed enrollment journal requires identity verification before it can be cleared")
+		}
 		inventory, inventoryErr := readProvisionInventory()
 		if inventoryErr != nil ||
 			inventory.AgentVersion != releaseVersion ||
@@ -455,6 +458,9 @@ func recoverProvisionJournalForInstall(
 		}
 		return false, nil
 	case "in_progress", "rollback_required":
+		if journal.Operation == "enroll_agent" {
+			return false, errors.New("an interrupted enrollment transaction may already be registered in Central; preserve Agent identity and reconcile before recovery")
+		}
 		if err := store.Rollback(&journal, provisionJournalRollbackRoots); err != nil {
 			return false, err
 		}
