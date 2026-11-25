@@ -381,3 +381,9 @@ php artisan nadi:install
 ```
 
 No Central source or production host was modified. The helper remains source code and is not yet a production-installed trusted OS helper.
+
+## Identity recovery policy decision — 2026-11-25
+
+- [x] Project owner accepted the binding sequence: fail closed → reconcile with NADI Central → obtain explicit authorization → re-enroll only when authorized.
+- [x] Recorded the normative rule, prohibited automatic identity replacement/token retry, Central reconciliation requirements, RESTORE versus re-enrollment separation, audit requirements, and acceptance criteria in [`docs/IDENTITY-RECOVERY-POLICY.md`](IDENTITY-RECOVERY-POLICY.md).
+- [ ] Implement and test the full recovery workflow. Policy acceptance does not by itself complete the RESTORE boundary; key recovery/rotation, migration, and Central reconciliation mechanics remain subject to their own reviewed designs.
