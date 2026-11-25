@@ -34,7 +34,7 @@ func Load() (Config, error) {
 		LogLevel:                  strings.ToLower(envOrDefault("NADI_LOG_LEVEL", "info")),
 		PollInterval:              30 * time.Second,
 		HTTPTimeout:               10 * time.Second,
-		StateDir:                  envOrDefault("NADI_STATE_DIR", "/var/lib/nadi"),
+		StateDir:                  envOrDefault("NADI_STATE_DIR", "/var/lib/nadi/state"),
 		ActivationPublicKeyPath:   envOrDefault("NADI_ACTIVATION_PUBLIC_KEY", "/etc/nadi/keys/activation-public.pem"),
 		ActivationKeyID:           envOrDefault("NADI_ACTIVATION_KEY_ID", "nadi-central-2026-01"),
 		LogTelemetryEnabled:       false,
