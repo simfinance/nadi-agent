@@ -128,7 +128,7 @@ func machineFingerprint() (string, error) {
 		}
 
 		machineID := strings.TrimSpace(string(content))
-		if machineID == "" {
+		if !validMachineID(machineID) {
 			continue
 		}
 
@@ -137,6 +137,26 @@ func machineFingerprint() (string, error) {
 	}
 
 	return "", errors.New("stable machine ID not found; expected /etc/machine-id or /var/lib/dbus/machine-id")
+}
+
+
+func validMachineID(machineID string) bool {
+	if len(machineID) != 32 {
+		return false
+	}
+
+	decoded, err := hex.DecodeString(machineID)
+	if err != nil || len(decoded) != 16 {
+		return false
+	}
+
+	for _, value := range decoded {
+		if value != 0 {
+			return true
+		}
+	}
+
+	return false
 }
 
 func newUUID() (string, error) {
