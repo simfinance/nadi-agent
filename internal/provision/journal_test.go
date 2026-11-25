@@ -716,3 +716,197 @@ func TestRemoveProvisionJournalAcceptsPersistedCommittedPhase(t *testing.T) {
 		t.Fatalf("committed journal should be removed, got error: %v", err)
 	}
 }
+
+func TestProvisionJournalRecoveryMarksUncreatedIntentAfterReload(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "provisioning-journal.json")
+	target := filepath.Join(directory, "not-created")
+
+	store, journal, err := newProvisionJournalForOperation(journalPath, "restore_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AddIntent(&journal, "file", target); err != nil {
+		t.Fatal(err)
+	}
+
+	reloadedStore, reloadedJournal, err := openProvisionJournal(journalPath)
+	if err != nil {
+		t.Fatalf("reload journal after intent persistence: %v", err)
+	}
+	if err := reloadedStore.Rollback(&reloadedJournal, []string{directory}); err != nil {
+		t.Fatalf("recover intent whose mutation never started: %v", err)
+	}
+
+	if reloadedJournal.Phase != "rolled_back" ||
+		reloadedJournal.Actions[0].State != "rolled_back" {
+		t.Fatalf("uncreated intent was not reconciled after reload: %#v", reloadedJournal)
+	}
+	if _, err := os.Lstat(target); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("recovery unexpectedly created the absent target: %v", err)
+	}
+}
+
+func TestProvisionJournalRecoveryPreservesDirectoryCreatedBeforeMarkAppliedAfterReload(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "provisioning-journal.json")
+	target := filepath.Join(directory, "created-before-fingerprint")
+
+	store, journal, err := newProvisionJournalForOperation(journalPath, "restore_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AddIntent(&journal, "directory", target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(target, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	reloadedStore, reloadedJournal, err := openProvisionJournal(journalPath)
+	if err != nil {
+		t.Fatalf("reload journal after directory creation: %v", err)
+	}
+	if err := reloadedStore.Rollback(&reloadedJournal, []string{directory}); err == nil {
+		t.Fatal("recovery must fail closed when a directory exists without a persisted fingerprint")
+	}
+
+	if _, err := os.Lstat(target); err != nil {
+		t.Fatalf("ambiguous directory must be preserved: %v", err)
+	}
+
+	persistedStore, persistedJournal, err := openProvisionJournal(journalPath)
+	if err != nil {
+		t.Fatalf("reload fail-closed recovery state: %v", err)
+	}
+	if persistedJournal.Phase != "rollback_required" ||
+		persistedJournal.Actions[0].State != "intent" {
+		t.Fatalf("ambiguous directory recovery state was not persisted: %#v", persistedJournal)
+	}
+	if persistedStore == nil {
+		t.Fatal("reloaded journal store is nil")
+	}
+}
+
+func TestProvisionJournalRecoveryResumesNestedRollbackAfterReload(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "provisioning-journal.json")
+	createdDirectory := filepath.Join(directory, "created-directory")
+	createdFile := filepath.Join(createdDirectory, "created-file")
+
+	store, journal, err := newProvisionJournalForOperation(journalPath, "restore_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	directoryIndex, err := store.AddIntent(&journal, "directory", createdDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(createdDirectory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkApplied(&journal, directoryIndex); err != nil {
+		t.Fatal(err)
+	}
+
+	fileIndex, err := store.AddIntent(&journal, "file", createdFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(createdFile, []byte("transaction-created file"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkApplied(&journal, fileIndex); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Remove(createdFile); err != nil {
+		t.Fatalf("simulate crash after file removal but before journal update: %v", err)
+	}
+
+	reloadedStore, reloadedJournal, err := openProvisionJournal(journalPath)
+	if err != nil {
+		t.Fatalf("reload partially rolled-back journal: %v", err)
+	}
+	if err := reloadedStore.Rollback(&reloadedJournal, []string{directory}); err != nil {
+		t.Fatalf("resume nested rollback after reload: %v", err)
+	}
+
+	if _, err := os.Lstat(createdFile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("removed transaction file unexpectedly reappeared: %v", err)
+	}
+	if _, err := os.Lstat(createdDirectory); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("empty transaction directory remains after resumed rollback: %v", err)
+	}
+	if reloadedJournal.Phase != "rolled_back" ||
+		reloadedJournal.Actions[directoryIndex].State != "rolled_back" ||
+		reloadedJournal.Actions[fileIndex].State != "rolled_back" {
+		t.Fatalf("nested rollback did not reach a persisted terminal state: %#v", reloadedJournal)
+	}
+}
+
+func TestProvisionJournalRecoveryKeepsPartialRollbackFailClosedAfterReload(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "provisioning-journal.json")
+	createdDirectory := filepath.Join(directory, "created-directory")
+	createdFile := filepath.Join(createdDirectory, "created-file")
+
+	store, journal, err := newProvisionJournalForOperation(journalPath, "restore_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	directoryIndex, err := store.AddIntent(&journal, "directory", createdDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(createdDirectory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkApplied(&journal, directoryIndex); err != nil {
+		t.Fatal(err)
+	}
+
+	fileIndex, err := store.AddIntent(&journal, "file", createdFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(createdFile, []byte("original transaction content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkApplied(&journal, fileIndex); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(createdFile, []byte("modified by another actor"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	reloadedStore, reloadedJournal, err := openProvisionJournal(journalPath)
+	if err != nil {
+		t.Fatalf("reload journal before partial rollback: %v", err)
+	}
+	if err := reloadedStore.Rollback(&reloadedJournal, []string{directory}); err == nil {
+		t.Fatal("recovery must stop when the newest resource no longer matches its fingerprint")
+	}
+
+	retryStore, retryJournal, err := openProvisionJournal(journalPath)
+	if err != nil {
+		t.Fatalf("reload journal after failed partial rollback: %v", err)
+	}
+	if err := retryStore.Rollback(&retryJournal, []string{directory}); err == nil {
+		t.Fatal("repeated recovery must remain fail-closed for a mismatched resource")
+	}
+
+	if _, err := os.Lstat(createdFile); err != nil {
+		t.Fatalf("modified file must be preserved after repeated recovery: %v", err)
+	}
+	if _, err := os.Lstat(createdDirectory); err != nil {
+		t.Fatalf("earlier directory must remain after repeated recovery: %v", err)
+	}
+	if retryJournal.Phase != "rollback_required" ||
+		retryJournal.Actions[directoryIndex].State != "applied" ||
+		retryJournal.Actions[fileIndex].State != "applied" {
+		t.Fatalf("repeated recovery changed the unresolved journal state: %#v", retryJournal)
+	}
+}
