@@ -242,3 +242,103 @@ func TestVerifyBrokerArtifactDirectoriesRejectsSymlinkAncestor(t *testing.T) {
 		t.Fatal("verification must reject a symlink in a managed directory's ancestry")
 	}
 }
+
+
+func TestInstallBrokerArtifactsJournaledRollsBackWhenDropInAncestorIsSymlinked(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "root")
+	if err := os.Mkdir(root, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	etcDirectory := filepath.Join(root, "etc")
+	if err := os.Mkdir(etcDirectory, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	outsideDirectory := filepath.Join(base, "outside")
+	if err := os.Mkdir(outsideDirectory, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	systemdPath := filepath.Join(etcDirectory, "systemd")
+	if err := os.Symlink(outsideDirectory, systemdPath); err != nil {
+		t.Fatal(err)
+	}
+
+	config := handoffbroker.Config{
+		SchemaVersion: 1,
+		AgentUID:      900,
+		AgentGID:      900,
+		Applications: []handoffbroker.Mapping{
+			{
+				ApplicationID:       "00000000-0000-4000-8000-000000000001",
+				ApplicationKey:      "app-one",
+				BasePath:            "/srv/www/app-one",
+				RuntimeUID:          1001,
+				RuntimeGID:          1001,
+				CredentialFile:      "/var/lib/nadi-bridge/00000000-0000-4000-8000-000000000001/credential",
+				ActivationStateFile: "/run/nadi/bridge-state/00000000-0000-4000-8000-000000000001.json",
+			},
+		},
+	}
+
+	mapping, err := encodeBrokerMapping(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dropIn, err := BuildBrokerDropIn(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	journalPath := filepath.Join(base, "provisioning-journal.json")
+	store, journal, err := newProvisionJournalForOperation(journalPath, "restore_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = installBrokerArtifactsJournaledAt(
+		root,
+		config,
+		mapping,
+		dropIn,
+		os.Getuid(),
+		os.Getgid(),
+		store,
+		&journal,
+	)
+	if err == nil {
+		t.Fatal("journaled Bridge installation must reject a symlinked systemd ancestor")
+	}
+
+	if err := store.Rollback(&journal, []string{root}); err != nil {
+		t.Fatalf("rollback partial Bridge installation: %v", err)
+	}
+
+	mappingPath := filepath.Join(root, "etc", "nadi", "bridge-mappings.json")
+	if _, err := os.Lstat(mappingPath); !os.IsNotExist(err) {
+		t.Fatalf("partial Bridge mapping was not rolled back: %v", err)
+	}
+
+	if _, err := os.Lstat(filepath.Join(root, "var")); !os.IsNotExist(err) {
+		t.Fatalf("partial Bridge directories were not rolled back: %v", err)
+	}
+
+	systemdMetadata, err := os.Lstat(systemdPath)
+	if err != nil {
+		t.Fatalf("pre-existing systemd symlink was not preserved: %v", err)
+	}
+	if systemdMetadata.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("pre-existing systemd path was unexpectedly replaced")
+	}
+
+	persistedJournal, err := store.Load()
+	if err != nil {
+		t.Fatalf("load completed rollback journal: %v", err)
+	}
+	if persistedJournal.Phase != "rolled_back" {
+		t.Fatalf("partial Bridge rollback did not reach rolled_back: %q", persistedJournal.Phase)
+	}
+}
