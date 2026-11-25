@@ -190,3 +190,56 @@ func TestEnsureDirectoryTreeRejectsSymlinkComponent(t *testing.T) {
 		t.Fatal("symlink path component must be rejected")
 	}
 }
+
+
+func TestVerifyBrokerArtifactDirectoriesRejectsSymlinkAncestor(t *testing.T) {
+	root := t.TempDir()
+	uid := os.Getuid()
+	gid := os.Getgid()
+
+	config := handoffbroker.Config{
+		SchemaVersion: 1,
+		AgentUID:      900,
+		AgentGID:      900,
+		Applications: []handoffbroker.Mapping{
+			{
+				ApplicationID:       "00000000-0000-4000-8000-000000000001",
+				ApplicationKey:      "app-one",
+				BasePath:            "/srv/www/app-one",
+				RuntimeUID:          1001,
+				RuntimeGID:          1001,
+				CredentialFile:      "/var/lib/nadi-bridge/00000000-0000-4000-8000-000000000001/credential",
+				ActivationStateFile: "/run/nadi/bridge-state/00000000-0000-4000-8000-000000000001.json",
+			},
+		},
+	}
+
+	directories := map[string]os.FileMode{
+		filepath.Join(root, "var", "lib", "nadi-bridge"): 0711,
+		filepath.Join(root, "var", "lib", "nadi-bridge", config.Applications[0].ApplicationID): 0711,
+		filepath.Join(root, "etc", "nadi"): 0750,
+		filepath.Join(root, "etc", "systemd", "system", "nadi-handoff-broker.service.d"): 0755,
+	}
+
+	for directory, mode := range directories {
+		if err := os.MkdirAll(directory, mode); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(directory, mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	systemdPath := filepath.Join(root, "etc", "systemd")
+	systemdTarget := filepath.Join(root, "etc", "systemd-target")
+	if err := os.Rename(systemdPath, systemdTarget); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(systemdTarget, systemdPath); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := verifyBrokerArtifactDirectories(config, root, uid, gid); err == nil {
+		t.Fatal("verification must reject a symlink in a managed directory's ancestry")
+	}
+}
