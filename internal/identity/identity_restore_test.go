@@ -252,3 +252,19 @@ func TestReadMachineIDLimitsFileSize(t *testing.T) {
 		t.Fatal("expected oversized machine ID file to be rejected")
 	}
 }
+
+func TestDecodeMachineIDCanonicalizesHexCase(t *testing.T) {
+	lowercase, valid := decodeMachineID("0123456789abcdef0123456789abcdef")
+	if !valid {
+		t.Fatal("expected lowercase machine ID to be valid")
+	}
+
+	uppercase, valid := decodeMachineID("0123456789ABCDEF0123456789ABCDEF")
+	if !valid {
+		t.Fatal("expected uppercase machine ID to be valid")
+	}
+
+	if string(lowercase) != string(uppercase) {
+		t.Fatal("equivalent hexadecimal machine IDs must decode to identical bytes")
+	}
+}
