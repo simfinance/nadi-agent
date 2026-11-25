@@ -608,25 +608,31 @@ func restoreExistingAgentIdentity(
 		return rollbackFailure(fmt.Errorf("verify existing Agent identity summary: %w", err))
 	}
 
+	completionExists := false
 	if existingCompletion, completionErr := readProvisionCompletion(); completionErr == nil {
+		completionExists = true
 		if existingCompletion.AgentInstanceID != identityRecord.AgentInstanceID ||
 			existingCompletion.AgentID != identityRecord.AgentID ||
 			existingCompletion.ServerID != identityRecord.ServerID {
 			return rollbackFailure(errors.New("existing Agent identity does not match the root-owned enrollment completion record"))
 		}
-		if existingCompletion.ApplicationCount != len(request.Applications) {
-			return rollbackFailure(errors.New("RESTORE cannot change the application inventory of an existing Agent identity"))
+		if existingCompletion.AgentVersion != releaseVersion ||
+			existingCompletion.ApplicationCount != len(request.Applications) {
+			return rollbackFailure(errors.New("RESTORE cannot change the installed Agent release or application inventory of an existing Agent identity"))
 		}
 	} else if !errors.Is(completionErr, os.ErrNotExist) {
 		return rollbackFailure(errors.New("existing enrollment completion metadata is unsafe or invalid; reconcile identity before RESTORE"))
 	}
 
+	inventoryExists := false
 	if _, inventoryStatErr := os.Lstat(provisionInventoryPath); inventoryStatErr == nil {
+		inventoryExists = true
 		existingInventory, inventoryErr := readProvisionInventory()
 		if inventoryErr != nil {
 			return rollbackFailure(errors.New("existing provisioning inventory is unsafe or invalid; reconcile identity before RESTORE"))
 		}
-		if existingInventory.ArtifactSHA256 != artifactSHA256 ||
+		if existingInventory.AgentVersion != releaseVersion ||
+			existingInventory.ArtifactSHA256 != artifactSHA256 ||
 			!sameApplicationInventory(existingInventory.Applications, request.Applications) {
 			return rollbackFailure(errors.New("RESTORE cannot replace the installed Agent release identity or application inventory"))
 		}
@@ -667,16 +673,18 @@ func restoreExistingAgentIdentity(
 	if err != nil {
 		return rollbackFailure(errors.New("encode restored provisioning inventory"))
 	}
-	if err := installImmutableFileJournaled(
-		provisionInventoryPath,
-		inventoryJSON,
-		0600,
-		0,
-		0,
-		store,
-		&journal,
-	); err != nil {
-		return rollbackFailure(fmt.Errorf("persist restored provisioning inventory: %w", err))
+	if !inventoryExists {
+		if err := installImmutableFileJournaled(
+			provisionInventoryPath,
+			inventoryJSON,
+			0600,
+			0,
+			0,
+			store,
+			&journal,
+		); err != nil {
+			return rollbackFailure(fmt.Errorf("persist restored provisioning inventory: %w", err))
+		}
 	}
 
 	completion := provisionCompletion{
@@ -692,16 +700,18 @@ func restoreExistingAgentIdentity(
 	if err != nil {
 		return rollbackFailure(errors.New("encode restored provisioning completion record"))
 	}
-	if err := installImmutableFileJournaled(
-		provisionCompletePath,
-		completionJSON,
-		0600,
-		0,
-		0,
-		store,
-		&journal,
-	); err != nil {
-		return rollbackFailure(fmt.Errorf("persist restored provisioning completion record: %w", err))
+	if !completionExists {
+		if err := installImmutableFileJournaled(
+			provisionCompletePath,
+			completionJSON,
+			0600,
+			0,
+			0,
+			store,
+			&journal,
+		); err != nil {
+			return rollbackFailure(fmt.Errorf("persist restored provisioning completion record: %w", err))
+		}
 	}
 
 	if _, err := runTrustedCommand("/usr/bin/systemctl", "daemon-reload"); err != nil {
