@@ -17,7 +17,7 @@ import (
 
 const integrityKeyFilename = "state-integrity-private.pem"
 
-func loadOrCreateIntegrityKey(directory string) (ed25519.PrivateKey, bool, error) {
+func loadOrCreateIntegrityKey(directory string, existingInstallMarker bool) (ed25519.PrivateKey, bool, error) {
 	key, err := loadExistingIntegrityKey(directory)
 	if err == nil {
 		return key, false, nil
@@ -32,6 +32,10 @@ func loadOrCreateIntegrityKey(directory string) (ed25519.PrivateKey, bool, error
 		return nil, false, errors.New("Agent state exists but its integrity key is missing; recovery is required")
 	} else if !errors.Is(statErr, os.ErrNotExist) {
 		return nil, false, fmt.Errorf("inspect existing Agent state: %w", statErr)
+	}
+
+	if existingInstallMarker {
+		return nil, false, errors.New("existing Agent installation marker is present but both state and integrity key are missing; recovery is required")
 	}
 
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
