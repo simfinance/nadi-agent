@@ -185,7 +185,6 @@ func TestDecodeEnrollmentIdentitySummaryRejectsIncompleteIdentity(t *testing.T) 
 	}
 }
 
-
 func TestReconcileRestoreMetadataPreservesVerifiedRecords(t *testing.T) {
 	applications := []ProvisionApplication{
 		{
@@ -261,8 +260,12 @@ func TestReconcileRestoreMetadataPreservesVerifiedRecords(t *testing.T) {
 		{
 			name:       "reject artifact digest mismatch",
 			completion: &completion,
-			inventory:  func() *provisionInventory { value := inventory; value.ArtifactSHA256 = strings.Repeat("b", 64); return &value }(),
-			wantError:  true,
+			inventory: func() *provisionInventory {
+				value := inventory
+				value.ArtifactSHA256 = strings.Repeat("b", 64)
+				return &value
+			}(),
+			wantError: true,
 		},
 		{
 			name:       "reject application inventory mismatch",
