@@ -76,3 +76,18 @@ func TestLoadReadOnlyRejectsInsecureStateFileMode(t *testing.T) {
 		t.Fatal("world-readable state file must be rejected")
 	}
 }
+
+
+func TestLoadReadOnlyRejectsLegacyPersistentDataLayout(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "nadi")
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "state.json"), []byte("legacy"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := LoadReadOnly(filepath.Join(root, "state")); err == nil {
+		t.Fatal("read-only identity verification must reject legacy persistent data")
+	}
+}
