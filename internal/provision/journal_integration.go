@@ -372,6 +372,14 @@ func removeProvisionJournal(store *provisionJournalStore, phase string) error {
 		return errors.New("only a committed or rolled-back provisioning journal can be removed")
 	}
 
+	persistedJournal, err := store.Load()
+	if err != nil {
+		return fmt.Errorf("verify provisioning journal before removal: %w", err)
+	}
+	if persistedJournal.Phase != phase {
+		return errors.New("persisted provisioning journal phase does not permit removal")
+	}
+
 	metadata, err := os.Lstat(store.path)
 	if err != nil {
 		return err

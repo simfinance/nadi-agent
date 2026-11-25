@@ -671,3 +671,48 @@ func TestEnrollmentJournalRecoveryRequiresMatchingDirectoryFingerprint(t *testin
 		t.Fatal("directory permission changes must invalidate the persisted transaction fingerprint")
 	}
 }
+
+
+func TestRemoveProvisionJournalRejectsUncommittedPhase(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "journal.json")
+
+	store, _, err := newProvisionJournal(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := removeProvisionJournal(store, "committed"); err == nil {
+		t.Fatal("an in-progress journal must not be removable as committed")
+	}
+	if _, err := os.Lstat(journalPath); err != nil {
+		t.Fatalf("rejected journal removal must preserve the journal: %v", err)
+	}
+}
+
+func TestRemoveProvisionJournalAcceptsPersistedCommittedPhase(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "journal.json")
+
+	store, journal, err := newProvisionJournal(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Commit(&journal); err != nil {
+		t.Fatal(err)
+	}
+
+	reloadedStore, reloadedJournal, err := openProvisionJournal(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloadedJournal.Phase != "committed" {
+		t.Fatalf("expected committed journal after reload, got %q", reloadedJournal.Phase)
+	}
+	if err := removeProvisionJournal(reloadedStore, "committed"); err != nil {
+		t.Fatalf("remove persisted committed journal: %v", err)
+	}
+	if _, err := os.Lstat(journalPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("committed journal should be removed, got error: %v", err)
+	}
+}
