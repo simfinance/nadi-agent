@@ -7,7 +7,7 @@ UNIT_SOURCE="${PACKAGE_ROOT}/systemd/nadi-agent.service"
 BINARY_TARGET="/opt/nadi/bin/nadi-agent"
 UNIT_TARGET="/etc/systemd/system/nadi-agent.service"
 ENV_TARGET="/etc/nadi/agent.env"
-STATE_DIR="/var/lib/nadi"
+STATE_DIR="/var/lib/nadi/state"
 KEY_FILE="/etc/nadi/keys/activation-public.pem"
 LEGACY_STATE_DIR="/var/lib/nadi-agent"
 LEGACY_CONFIG_DIR="/etc/nadi-agent"
@@ -60,18 +60,18 @@ if [[ "${state_owner}" != "nadi-agent:nadi-agent" || "${state_mode}" != "600" ]]
 fi
 
 if ! id nadi-agent >/dev/null 2>&1; then
-    useradd --system --home-dir /var/lib/nadi --shell /usr/sbin/nologin nadi-agent
+    useradd --system --home-dir /var/lib/nadi/state --shell /usr/sbin/nologin nadi-agent
 fi
 
 install -d -o root -g root -m 0755 /opt/nadi /opt/nadi/bin
 install -d -o root -g root -m 0755 /etc/nadi
 install -d -o root -g root -m 0755 /etc/nadi/keys
-install -d -o nadi-agent -g nadi-agent -m 0700 "${STATE_DIR}"
+install -d -o nadi-agent -g nadi-agent -m 0700 /var/lib/nadi /var/lib/nadi/state /var/lib/nadi/spool /var/lib/nadi/engines
 
 if [[ ! -e "${ENV_TARGET}" ]]; then
     cat > "${ENV_TARGET}" <<'ENVEOF'
 NADI_CENTRAL_URL=https://nadi.pesantrenalirsyad.org
-NADI_STATE_DIR=/var/lib/nadi
+NADI_STATE_DIR=/var/lib/nadi/state
 NADI_ACTIVATION_PUBLIC_KEY=/etc/nadi/keys/activation-public.pem
 NADI_ACTIVATION_KEY_ID=nadi-central-2026-01
 NADI_LOG_LEVEL=info
