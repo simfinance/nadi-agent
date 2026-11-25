@@ -98,3 +98,89 @@ func TestVerifyReadOnlyRejectsEmptyMachineFingerprint(t *testing.T) {
 		t.Fatalf("expected empty machine fingerprint to fail identity verification, got %v", err)
 	}
 }
+
+func TestVerifyReadOnlyRejectsIncompleteOrDuplicateApplicationIdentity(t *testing.T) {
+	fingerprint, err := machineFingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	baseApplication := state.EnrolledApplication{
+		ApplicationID:  "application-one",
+		RegistrationID: "registration-one",
+	}
+	secondApplication := state.EnrolledApplication{
+		ApplicationID:  "application-two",
+		RegistrationID: "registration-two",
+	}
+
+	tests := []struct {
+		name         string
+		applications []state.EnrolledApplication
+	}{
+		{
+			name: "empty application ID",
+			applications: []state.EnrolledApplication{
+				{
+					RegistrationID: "registration-one",
+				},
+			},
+		},
+		{
+			name: "empty registration ID",
+			applications: []state.EnrolledApplication{
+				{
+					ApplicationID: "application-one",
+				},
+			},
+		},
+		{
+			name: "duplicate application ID",
+			applications: []state.EnrolledApplication{
+				baseApplication,
+				{
+					ApplicationID:  baseApplication.ApplicationID,
+					RegistrationID: secondApplication.RegistrationID,
+				},
+			},
+		},
+		{
+			name: "duplicate registration ID",
+			applications: []state.EnrolledApplication{
+				baseApplication,
+				{
+					ApplicationID:  secondApplication.ApplicationID,
+					RegistrationID: baseApplication.RegistrationID,
+				},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			store, err := state.Open(directory)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if err := store.Save(state.State{
+				AgentInstanceID:    "agent-instance-restore",
+				MachineFingerprint: fingerprint,
+				CentralAgentID:     "central-agent",
+				CentralServerID:    "central-server",
+				EnrollmentStatus:   "registered",
+				Applications:       test.applications,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := VerifyReadOnly(directory); err == nil {
+				t.Fatal("expected invalid application identity inventory to be rejected")
+			}
+		})
+	}
+}
