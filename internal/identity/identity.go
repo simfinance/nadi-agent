@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -122,13 +123,8 @@ func machineFingerprint() (string, error) {
 	}
 
 	for _, path := range paths {
-		content, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-
-		machineID := strings.TrimSpace(string(content))
-		if !validMachineID(machineID) {
+		machineID, err := readMachineID(path)
+		if err != nil || !validMachineID(machineID) {
 			continue
 		}
 
@@ -137,6 +133,25 @@ func machineFingerprint() (string, error) {
 	}
 
 	return "", errors.New("stable machine ID not found; expected /etc/machine-id or /var/lib/dbus/machine-id")
+}
+
+
+func readMachineID(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(io.LimitReader(file, 65))
+	if err != nil {
+		return "", err
+	}
+	if len(content) > 64 {
+		return "", errors.New("machine ID file exceeds the size limit")
+	}
+
+	return strings.TrimSpace(string(content)), nil
 }
 
 func validMachineID(machineID string) bool {
