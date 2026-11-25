@@ -29,6 +29,7 @@ var allowedGrantCapabilities = map[string]struct{}{
 	"database_monitoring":  {},
 	"queue_monitoring":     {},
 	"scheduler_monitoring": {},
+	"system_logs":          {},
 	"application_logs":     {},
 }
 
