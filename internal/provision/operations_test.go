@@ -289,11 +289,11 @@ func TestReconcileRestoreMetadataPreservesVerifiedRecords(t *testing.T) {
 			if err != nil {
 				return
 			}
-			if completionWrite == !test.wantCompletionWrite {
-				t.Fatalf("completion write decision = %t, want %t", !test.wantCompletionWrite, completionWrite)
+			if completionWrite != test.wantCompletionWrite {
+				t.Fatalf("completion write decision = %t, want %t", completionWrite, test.wantCompletionWrite)
 			}
-			if inventoryWrite == !test.wantInventoryWrite {
-				t.Fatalf("inventory write decision = %t, want %t", !test.wantInventoryWrite, inventoryWrite)
+			if inventoryWrite != test.wantInventoryWrite {
+				t.Fatalf("inventory write decision = %t, want %t", inventoryWrite, test.wantInventoryWrite)
 			}
 		})
 	}
