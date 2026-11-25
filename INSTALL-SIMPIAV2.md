@@ -6,7 +6,7 @@ Paket ini disiapkan untuk simpiav2 Linux Ubuntu x86_64. Installer hanya memasang
 
 - Server `simpiav2` menggunakan `x86_64`.
 - Agent sudah terdaftar di Central dan status monitoring aplikasi `ACTIVE`.
-- State Agent hasil enrollment tersedia di `/var/lib/nadi/state.json` dan dimiliki `nadi-agent:nadi-agent` dengan mode `0600`.
+- State Agent hasil enrollment tersedia di `/var/lib/nadi/state/state.json` dan dimiliki `nadi-agent:nadi-agent` dengan mode `0600`.
 - Public key Activation Central tersedia di `/etc/nadi/keys/activation-public.pem` (Ed25519 PEM yang sudah digunakan sebelumnya).
 - Jangan menghapus, mengganti, atau menyalin `state.json` dari server lain. File tersebut berisi credential.
 - Tidak boleh ada direktori instalasi legacy `/var/lib/nadi-agent` atau `/etc/nadi-agent`. Installer menolak kondisi tersebut dan tidak memindahkan state/credential secara otomatis.
@@ -33,7 +33,7 @@ sudo ./scripts/install-simpiav2.sh
 
 Installer akan membuat/memastikan user `nadi-agent`, direktori standar kanonis, memasang binary, menyiapkan file environment jika belum ada, memasang unit systemd, dan menjalankan `systemctl daemon-reload`. Binary lama akan dicadangkan dengan timestamp. Existing `state.json` tidak disentuh.
 
-Installer menggunakan root direktori sesuai Master Rule: `/opt/nadi`, `/etc/nadi`, dan `/var/lib/nadi`. Installer sengaja **tidak** menjalankan atau mengaktifkan service.
+Installer menggunakan layout ADR-0001: binary di `/opt/nadi/bin/`, konfigurasi di `/etc/nadi/`, state di `/var/lib/nadi/state/`, spool di `/var/lib/nadi/spool/`, engine di `/var/lib/nadi/engines/`, log di `/var/log/nadi/`, dan runtime socket di `/run/nadi/`. Installer sengaja **tidak** menjalankan atau mengaktifkan service.
 
 Jika direktori legacy `/var/lib/nadi-agent` atau `/etc/nadi-agent` masih ada, installer berhenti sebelum melakukan perubahan. Jangan menghapus atau memindahkan direktori tersebut secara manual. Prosedur migrasi/recovery harus menjaga state, integrity key, credential, ownership, permission, dan identitas Agent; prosedur rinci tersebut belum ditetapkan dalam spesifikasi.
 
@@ -44,7 +44,7 @@ Jalankan:
 ```bash
 sudo stat -c '%a %U:%G %n' \
     /var/lib/nadi \
-    /var/lib/nadi/state.json \
+    /var/lib/nadi/state/state.json \
     /etc/nadi/keys/activation-public.pem \
     /opt/nadi/bin/nadi-agent
 ```
@@ -52,6 +52,9 @@ sudo stat -c '%a %U:%G %n' \
 Ekspektasi:
 
 - `/var/lib/nadi`: `700 nadi-agent:nadi-agent`
+- `/var/lib/nadi/state`: `700 nadi-agent:nadi-agent`
+- `/var/lib/nadi/spool`: `700 nadi-agent:nadi-agent`
+- `/var/lib/nadi/engines`: `700 nadi-agent:nadi-agent`
 - `state.json`: `600 nadi-agent:nadi-agent`
 - Activation public key: `644 root:root`
 - Binary: `755 root:root`
