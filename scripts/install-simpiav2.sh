@@ -87,6 +87,11 @@ else
     fi
 fi
 
+if [[ -L "${STATE_DIR}" || ! -d "${STATE_DIR}" ]]; then
+    echo "ERROR: state directory hilang, bukan direktori, atau berupa symlink." >&2
+    exit 1
+fi
+
 state_dir_owner="$(stat -c '%U:%G' "${STATE_DIR}")"
 state_dir_mode="$(stat -c '%a' "${STATE_DIR}")"
 if [[ "${state_dir_owner}" != "nadi-agent:nadi-agent" || "${state_dir_mode}" != "700" ]]; then
@@ -112,8 +117,8 @@ for data_dir in /var/lib/nadi /var/lib/nadi/spool /var/lib/nadi/engines; do
 done
 
 install -d -o root -g root -m 0755 /opt/nadi /opt/nadi/bin
-install -d -o root -g root -m 0755 /etc/nadi
-install -d -o root -g root -m 0755 /etc/nadi/keys
+install -d -o root -g nadi-agent -m 0750 /etc/nadi
+install -d -o root -g nadi-agent -m 0750 /etc/nadi/keys
 
 if [[ ! -e "${ENV_TARGET}" ]]; then
     cat > "${ENV_TARGET}" <<'ENVEOF'
@@ -128,6 +133,12 @@ ENVEOF
     chown root:nadi-agent "${ENV_TARGET}"
     chmod 0640 "${ENV_TARGET}"
 else
+    env_owner="$(stat -c '%U:%G' "${ENV_TARGET}")"
+    env_mode="$(stat -c '%a' "${ENV_TARGET}")"
+    if [[ "${env_owner}" != "root:nadi-agent" || "${env_mode}" != "640" ]]; then
+        echo "ERROR: agent.env harus 640 root:nadi-agent; existing config tidak diubah otomatis." >&2
+        exit 1
+    fi
     if ! grep -Fxq "NADI_STATE_DIR=/var/lib/nadi/state" "${ENV_TARGET}" ||
         ! grep -Fxq "NADI_ACTIVATION_PUBLIC_KEY=/etc/nadi/keys/activation-public.pem" "${ENV_TARGET}"; then
         echo "ERROR: konfigurasi environment existing tidak sesuai layout ADR-0001." >&2
