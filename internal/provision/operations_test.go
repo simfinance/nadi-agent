@@ -232,9 +232,9 @@ func TestReconcileRestoreMetadataPreservesVerifiedRecords(t *testing.T) {
 			wantInventoryExists:  true,
 		},
 		{
-			name:                 "create only missing completion",
-			inventory:            &inventory,
-			wantInventoryExists:  true,
+			name:                "create only missing completion",
+			inventory:           &inventory,
+			wantInventoryExists: true,
 		},
 		{
 			name:                 "create only missing inventory",
