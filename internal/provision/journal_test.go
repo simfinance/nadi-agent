@@ -637,7 +637,6 @@ func TestEnrollmentJournalRecoveryRejectsUnexpectedTarget(t *testing.T) {
 	}
 }
 
-
 func TestEnrollmentJournalRecoveryRequiresMatchingDirectoryFingerprint(t *testing.T) {
 	directory := t.TempDir()
 	journalPath := filepath.Join(directory, "journal.json")
