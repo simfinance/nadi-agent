@@ -191,7 +191,6 @@ func TestEnsureDirectoryTreeRejectsSymlinkComponent(t *testing.T) {
 	}
 }
 
-
 func TestVerifyBrokerArtifactDirectoriesRejectsSymlinkAncestor(t *testing.T) {
 	root := t.TempDir()
 	uid := os.Getuid()
@@ -215,10 +214,10 @@ func TestVerifyBrokerArtifactDirectoriesRejectsSymlinkAncestor(t *testing.T) {
 	}
 
 	directories := map[string]os.FileMode{
-		filepath.Join(root, "var", "lib", "nadi-bridge"): 0711,
+		filepath.Join(root, "var", "lib", "nadi-bridge"):                                       0711,
 		filepath.Join(root, "var", "lib", "nadi-bridge", config.Applications[0].ApplicationID): 0711,
-		filepath.Join(root, "etc", "nadi"): 0750,
-		filepath.Join(root, "etc", "systemd", "system", "nadi-handoff-broker.service.d"): 0755,
+		filepath.Join(root, "etc", "nadi"):                                                     0750,
+		filepath.Join(root, "etc", "systemd", "system", "nadi-handoff-broker.service.d"):       0755,
 	}
 
 	for directory, mode := range directories {
