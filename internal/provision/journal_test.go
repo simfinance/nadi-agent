@@ -636,3 +636,39 @@ func TestEnrollmentJournalRecoveryRejectsUnexpectedTarget(t *testing.T) {
 		t.Fatal("recovery must reject journal targets outside the expected Bridge artifact set")
 	}
 }
+
+
+func TestEnrollmentJournalRecoveryRequiresMatchingDirectoryFingerprint(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "journal.json")
+	target := filepath.Join(directory, "bridge-artifacts")
+
+	store, journal, err := newProvisionJournalForOperation(journalPath, "enroll_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	index, err := store.AddIntent(&journal, "directory", target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(target, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkApplied(&journal, index); err != nil {
+		t.Fatal(err)
+	}
+
+	expectedTargets := map[string]string{
+		target: "directory",
+	}
+	if err := verifyEnrollmentJournalActions(&journal, expectedTargets); err != nil {
+		t.Fatalf("matching directory fingerprint should be accepted: %v", err)
+	}
+
+	if err := os.Chmod(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyEnrollmentJournalActions(&journal, expectedTargets); err == nil {
+		t.Fatal("directory permission changes must invalidate the persisted transaction fingerprint")
+	}
+}
