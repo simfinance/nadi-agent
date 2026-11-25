@@ -347,6 +347,9 @@ func verifyBrokerArtifactDirectories(
 	}
 
 	for _, directory := range directories {
+		if err := ensureNoSymlinkPath(directory.path); err != nil {
+			return fmt.Errorf("Bridge directory path %s is unsafe: %w", directory.path, err)
+		}
 		metadata, err := os.Lstat(directory.path)
 		if err != nil {
 			return fmt.Errorf("inspect Bridge directory %s: %w", directory.path, err)

@@ -861,9 +861,9 @@ func recoverEnrollmentJournal(inventory provisionInventory) error {
 		return errors.New("journal does not describe an enrollment transaction")
 	}
 
-	attemptExists, err := hasProvisionEnrollmentAttempt()
-	if err != nil || !attemptExists {
-		return errors.New("enrollment attempt boundary is missing or invalid")
+	attempt, err := readProvisionEnrollmentAttempt()
+	if err != nil || attempt.ApplicationCount != len(inventory.Applications) {
+		return errors.New("enrollment attempt boundary is missing, invalid, or does not match the installed application inventory")
 	}
 
 	identity, summaryJSON, identityRecord, err := verifyAgentIdentitySummary(
@@ -1417,13 +1417,10 @@ func validSHA256Digest(value string) bool {
 	return err == nil
 }
 
-func hasProvisionEnrollmentAttempt() (bool, error) {
+func readProvisionEnrollmentAttempt() (provisionEnrollmentAttempt, error) {
 	content, err := readRootOwnedRegularFile(provisionAttemptPath, 4096)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
 	if err != nil {
-		return false, err
+		return provisionEnrollmentAttempt{}, err
 	}
 
 	var attempt provisionEnrollmentAttempt
@@ -1432,10 +1429,22 @@ func hasProvisionEnrollmentAttempt() (bool, error) {
 	if err := decoder.Decode(&attempt); err != nil || ensureJSONEOF(decoder) != nil ||
 		attempt.ProtocolVersion != 1 || attempt.ApplicationCount < 1 ||
 		attempt.ApplicationCount > 20 || len(attempt.ManifestSHA256) != 64 {
-		return false, errors.New("enrollment attempt metadata is invalid")
+		return provisionEnrollmentAttempt{}, errors.New("enrollment attempt metadata is invalid")
 	}
 	if _, err := hex.DecodeString(attempt.ManifestSHA256); err != nil {
-		return false, errors.New("enrollment attempt manifest digest is invalid")
+		return provisionEnrollmentAttempt{}, errors.New("enrollment attempt manifest digest is invalid")
+	}
+
+	return attempt, nil
+}
+
+func hasProvisionEnrollmentAttempt() (bool, error) {
+	_, err := readProvisionEnrollmentAttempt()
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
 	}
 
 	return true, nil
