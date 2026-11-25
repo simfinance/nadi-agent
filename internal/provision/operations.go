@@ -679,10 +679,6 @@ func restoreExistingAgentIdentity(
 		return rollbackFailure(fmt.Errorf("persist restored provisioning inventory: %w", err))
 	}
 
-	identityRecord, err := decodeEnrollmentIdentitySummary(summaryJSON)
-	if err != nil {
-		return rollbackFailure(fmt.Errorf("verify restored Agent identity summary: %w", err))
-	}
 	completion := provisionCompletion{
 		ProtocolVersion:  1,
 		AgentVersion:     releaseVersion,
