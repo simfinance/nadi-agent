@@ -387,3 +387,9 @@ No Central source or production host was modified. The helper remains source cod
 - [x] Project owner accepted the binding sequence: fail closed → reconcile with NADI Central → obtain explicit authorization → re-enroll only when authorized.
 - [x] Recorded the normative rule, prohibited automatic identity replacement/token retry, Central reconciliation requirements, RESTORE versus re-enrollment separation, audit requirements, and acceptance criteria in [`docs/IDENTITY-RECOVERY-POLICY.md`](IDENTITY-RECOVERY-POLICY.md).
 - [ ] Implement and test the full recovery workflow. Policy acceptance does not by itself complete the RESTORE boundary; key recovery/rotation, migration, and Central reconciliation mechanics remain subject to their own reviewed designs.
+## Identity-loss recovery enforcement — 2026-11-25
+
+- [x] Agent state initialization now distinguishes a genuinely fresh installation (new integrity key created during the current open) from an existing installation whose persisted state has disappeared.
+- [x] If `state.json` is missing while the existing integrity key or persistent `agent.lock` installation marker remains, Agent initialization fails closed and does not generate a replacement Agent identity or integrity key.
+- [x] Added regression coverage for missing state with a retained integrity key and for missing state plus integrity key with the persistent installation marker retained.
+- [ ] Latest Go validation workflow must complete successfully before this enforcement change is considered validated.
