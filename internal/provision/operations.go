@@ -863,6 +863,17 @@ func runEnrollAgentOperation(request ProvisionOperationRequest, response HelperR
 		writeHelperResponse(writer, response)
 		return 0
 	}
+	if _, completionErr := os.Lstat(provisionCompletePath); completionErr == nil {
+		response.Phase = "recovery_required"
+		response.EnrollmentStatus = "unknown"
+		response.RetrySafe = false
+		return writeOperationFailure(writer, errorWriter, response, errors.New("existing enrollment completion metadata is invalid; reconcile identity before any enrollment"))
+	} else if !errors.Is(completionErr, os.ErrNotExist) {
+		response.Phase = "recovery_required"
+		response.EnrollmentStatus = "unknown"
+		response.RetrySafe = false
+		return writeOperationFailure(writer, errorWriter, response, errors.New("existing enrollment completion metadata cannot be safely inspected"))
+	}
 
 	attemptExists, attemptErr := hasProvisionEnrollmentAttempt()
 	if attemptErr != nil {
