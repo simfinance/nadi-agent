@@ -105,6 +105,10 @@ func Open(directory string) (*Store, error) {
 		return nil, errors.New("state directory must not be empty")
 	}
 
+	if err := rejectLegacyStateLayout(directory); err != nil {
+		return nil, err
+	}
+
 	if err := os.MkdirAll(directory, 0700); err != nil {
 		return nil, fmt.Errorf("create state directory: %w", err)
 	}
@@ -201,6 +205,10 @@ func (s *Store) Load() (State, error) {
 func LoadReadOnly(directory string) (State, error) {
 	if directory == "" || !filepath.IsAbs(directory) || filepath.Clean(directory) != directory {
 		return State{}, errors.New("state directory must be absolute and canonical")
+	}
+
+	if err := rejectLegacyStateLayout(directory); err != nil {
+		return State{}, err
 	}
 
 	directoryMetadata, err := os.Lstat(directory)
@@ -379,6 +387,34 @@ func (s *Store) Close() error {
 
 	if closeErr != nil {
 		return fmt.Errorf("close agent process lock: %w", closeErr)
+	}
+
+	return nil
+}
+
+
+func rejectLegacyStateLayout(directory string) error {
+	if filepath.Base(directory) != "state" || filepath.Base(filepath.Dir(directory)) != "nadi" {
+		return nil
+	}
+
+	legacyRoot := filepath.Dir(directory)
+	legacyArtifacts := []string{
+		"state.json",
+		"state-integrity-private.pem",
+		"agent.lock",
+		"log-dedupe",
+		"nginx-error-log-cursor.json",
+		"telemetry-delivery",
+	}
+
+	for _, artifact := range legacyArtifacts {
+		path := filepath.Join(legacyRoot, artifact)
+		if _, err := os.Lstat(path); err == nil {
+			return fmt.Errorf("legacy Agent persistent data detected at %s; recovery is required before using the canonical state directory", artifact)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect legacy Agent persistent data: %w", err)
+		}
 	}
 
 	return nil
