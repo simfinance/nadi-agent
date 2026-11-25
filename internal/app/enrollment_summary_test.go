@@ -80,6 +80,55 @@ func TestWriteEnrollmentSummaryOmitsCredentialMaterial(t *testing.T) {
 	if len(summary.Applications) != 1 || summary.Applications[0].ApplicationID != "application-1" {
 		t.Fatalf("unexpected enrollment application summary: %#v", summary.Applications)
 	}
+
+	var payload map[string]json.RawMessage
+
+	if err := json.Unmarshal(output.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+
+	expectedSummaryFields := []string{
+		"protocol_version",
+		"enrollment_status",
+		"agent_instance_id",
+		"agent_id",
+		"server_id",
+		"applications",
+	}
+
+	if len(payload) != len(expectedSummaryFields) {
+		t.Fatalf("unexpected enrollment summary fields: %#v", payload)
+	}
+
+	for _, field := range expectedSummaryFields {
+		if _, exists := payload[field]; !exists {
+			t.Errorf("enrollment summary is missing allowed field %q", field)
+		}
+	}
+
+	var applications []map[string]json.RawMessage
+
+	if err := json.Unmarshal(payload["applications"], &applications); err != nil {
+		t.Fatal(err)
+	}
+
+	expectedApplicationFields := []string{
+		"application_id",
+		"application_key",
+		"application_name",
+		"environment",
+		"registration_id",
+	}
+
+	if len(applications) != 1 || len(applications[0]) != len(expectedApplicationFields) {
+		t.Fatalf("unexpected enrollment application summary fields: %#v", applications)
+	}
+
+	for _, field := range expectedApplicationFields {
+		if _, exists := applications[0][field]; !exists {
+			t.Errorf("enrollment application summary is missing allowed field %q", field)
+		}
+	}
 }
 
 func TestWriteEnrollmentSummarySupportsMultipleApplicationsForOneAgent(t *testing.T) {
