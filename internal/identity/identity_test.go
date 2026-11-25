@@ -80,7 +80,6 @@ func TestEnsureDoesNotRecreateIdentityWhenStateIsMissingFromExistingInstallation
 	}
 }
 
-
 func TestEnsureRejectsMissingStateAndIntegrityKeyWhenInstallMarkerRemains(t *testing.T) {
 	directory := t.TempDir()
 	store, err := state.Open(directory)
