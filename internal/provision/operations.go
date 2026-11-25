@@ -608,36 +608,34 @@ func restoreExistingAgentIdentity(
 		return rollbackFailure(fmt.Errorf("verify existing Agent identity summary: %w", err))
 	}
 
-	completionExists := false
-	if existingCompletion, completionErr := readProvisionCompletion(); completionErr == nil {
-		completionExists = true
-		if existingCompletion.AgentInstanceID != identityRecord.AgentInstanceID ||
-			existingCompletion.AgentID != identityRecord.AgentID ||
-			existingCompletion.ServerID != identityRecord.ServerID {
-			return rollbackFailure(errors.New("existing Agent identity does not match the root-owned enrollment completion record"))
-		}
-		if existingCompletion.AgentVersion != releaseVersion ||
-			existingCompletion.ApplicationCount != len(request.Applications) {
-			return rollbackFailure(errors.New("RESTORE cannot change the installed Agent release or application inventory of an existing Agent identity"))
-		}
+	var existingCompletion *provisionCompletion
+	if completion, completionErr := readProvisionCompletion(); completionErr == nil {
+		existingCompletion = &completion
 	} else if !errors.Is(completionErr, os.ErrNotExist) {
 		return rollbackFailure(errors.New("existing enrollment completion metadata is unsafe or invalid; reconcile identity before RESTORE"))
 	}
 
-	inventoryExists := false
+	var existingInventory *provisionInventory
 	if _, inventoryStatErr := os.Lstat(provisionInventoryPath); inventoryStatErr == nil {
-		inventoryExists = true
-		existingInventory, inventoryErr := readProvisionInventory()
+		inventory, inventoryErr := readProvisionInventory()
 		if inventoryErr != nil {
 			return rollbackFailure(errors.New("existing provisioning inventory is unsafe or invalid; reconcile identity before RESTORE"))
 		}
-		if existingInventory.AgentVersion != releaseVersion ||
-			existingInventory.ArtifactSHA256 != artifactSHA256 ||
-			!sameApplicationInventory(existingInventory.Applications, request.Applications) {
-			return rollbackFailure(errors.New("RESTORE cannot replace the installed Agent release identity or application inventory"))
-		}
+		existingInventory = &inventory
 	} else if !errors.Is(inventoryStatErr, os.ErrNotExist) {
 		return rollbackFailure(errors.New("existing provisioning inventory cannot be safely inspected; reconcile identity before RESTORE"))
+	}
+
+	completionExists, inventoryExists, metadataErr := reconcileRestoreMetadata(
+		existingCompletion,
+		existingInventory,
+		identityRecord,
+		releaseVersion,
+		artifactSHA256,
+		request.Applications,
+	)
+	if metadataErr != nil {
+		return rollbackFailure(metadataErr)
 	}
 
 	legacyRequest := ProvisionRequest{
@@ -727,6 +725,37 @@ func restoreExistingAgentIdentity(
 
 	return nil
 }
+func reconcileRestoreMetadata(
+	completion *provisionCompletion,
+	inventory *provisionInventory,
+	identity provisionCompletion,
+	releaseVersion string,
+	artifactSHA256 string,
+	applications []ProvisionApplication,
+) (bool, bool, error) {
+	if completion != nil {
+		if completion.AgentInstanceID != identity.AgentInstanceID ||
+			completion.AgentID != identity.AgentID ||
+			completion.ServerID != identity.ServerID {
+			return false, false, errors.New("existing Agent identity does not match the root-owned enrollment completion record")
+		}
+		if completion.AgentVersion != releaseVersion ||
+			completion.ApplicationCount != len(applications) {
+			return false, false, errors.New("RESTORE cannot change the installed Agent release or application inventory of an existing Agent identity")
+		}
+	}
+
+	if inventory != nil {
+		if inventory.AgentVersion != releaseVersion ||
+			inventory.ArtifactSHA256 != artifactSHA256 ||
+			!sameApplicationInventory(inventory.Applications, applications) {
+			return false, false, errors.New("RESTORE cannot replace the installed Agent release identity or application inventory")
+		}
+	}
+
+	return completion != nil, inventory != nil, nil
+}
+
 func verifyInstalledAgentBinaryDigest(expectedSHA256 string) error {
 	content, err := readRootOwnedRegularFile(agentBinaryPath, maximumArtifactBytes)
 	if err != nil {
