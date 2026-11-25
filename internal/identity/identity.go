@@ -47,6 +47,10 @@ func Ensure(store *state.Store) (state.State, error) {
 		return state.State{}, err
 	}
 
+	if !store.IsFreshInstallation() {
+		return state.State{}, errors.New("Agent state is missing from an existing installation; recovery is required and a new identity will not be created")
+	}
+
 	instanceID, err := newUUID()
 	if err != nil {
 		return state.State{}, fmt.Errorf("generate agent instance ID: %w", err)
