@@ -94,6 +94,24 @@ func VerifyReadOnly(directory string) (state.State, error) {
 		return state.State{}, errors.New("persisted Agent application identity count is invalid")
 	}
 
+	applicationIDs := make(map[string]struct{}, len(current.Applications))
+	registrationIDs := make(map[string]struct{}, len(current.Applications))
+	for _, application := range current.Applications {
+		if application.ApplicationID == "" || application.RegistrationID == "" {
+			return state.State{}, errors.New("persisted Agent application identity is incomplete or duplicated")
+		}
+
+		if _, exists := applicationIDs[application.ApplicationID]; exists {
+			return state.State{}, errors.New("persisted Agent application identity is incomplete or duplicated")
+		}
+		if _, exists := registrationIDs[application.RegistrationID]; exists {
+			return state.State{}, errors.New("persisted Agent application identity is incomplete or duplicated")
+		}
+
+		applicationIDs[application.ApplicationID] = struct{}{}
+		registrationIDs[application.RegistrationID] = struct{}{}
+	}
+
 	return current, nil
 }
 
