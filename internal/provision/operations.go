@@ -205,6 +205,12 @@ func RunPrivileged(reader io.Reader, writer io.Writer, errorWriter io.Writer) in
 		return writeOperationFailure(writer, errorWriter, response, err)
 	}
 
+	if err := validateSupportedHost(); err != nil {
+		response.Phase = "platform_preflight"
+		response.RetrySafe = false
+		return writeOperationFailure(writer, errorWriter, response, err)
+	}
+
 	unlock, err := acquireProvisionLock()
 	if err != nil {
 		response.Phase = "operation_lock"
