@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -224,5 +225,30 @@ func TestValidMachineID(t *testing.T) {
 				t.Fatalf("validMachineID(%q) = %v, want %v", test.machineID, actual, test.valid)
 			}
 		})
+	}
+}
+
+func TestReadMachineIDLimitsFileSize(t *testing.T) {
+	directory := t.TempDir()
+	path := directory + "/machine-id"
+
+	if err := os.WriteFile(path, []byte("0123456789abcdef0123456789abcdef\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	machineID, err := readMachineID(path)
+	if err != nil {
+		t.Fatalf("read valid machine ID: %v", err)
+	}
+	if machineID != "0123456789abcdef0123456789abcdef" {
+		t.Fatalf("unexpected machine ID: %q", machineID)
+	}
+
+	if err := os.WriteFile(path, make([]byte, 1024*1024), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := readMachineID(path); err == nil {
+		t.Fatal("expected oversized machine ID file to be rejected")
 	}
 }
