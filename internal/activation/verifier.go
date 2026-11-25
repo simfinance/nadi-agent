@@ -146,7 +146,6 @@ func (v *Verifier) Verify(grant control.ActivationGrant, application control.App
 	return payload, nil
 }
 
-
 func validateGrantTimes(issuedAt time.Time, expiresAt time.Time, now time.Time) error {
 	if issuedAt.After(now.Add(maximumClockSkew)) {
 		return errors.New("Activation Grant issued_at is in the future")
