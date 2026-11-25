@@ -46,7 +46,6 @@ func TestEnsureCreatesAndPersistsIdentity(t *testing.T) {
 	}
 }
 
-
 func TestEnsureDoesNotRecreateIdentityWhenStateIsMissingFromExistingInstallation(t *testing.T) {
 	directory := t.TempDir()
 	store, err := state.Open(directory)
