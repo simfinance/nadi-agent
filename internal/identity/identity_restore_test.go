@@ -75,3 +75,26 @@ func TestVerifyReadOnlyRejectsDifferentMachineIdentity(t *testing.T) {
 		t.Fatalf("expected machine identity mismatch, got %v", err)
 	}
 }
+
+func TestVerifyReadOnlyRejectsEmptyMachineFingerprint(t *testing.T) {
+	directory := t.TempDir()
+	store, err := state.Open(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(state.State{
+		AgentInstanceID:  "agent-instance-restore",
+		CentralAgentID:   "central-agent",
+		CentralServerID:  "central-server",
+		EnrollmentStatus: "registered",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := VerifyReadOnly(directory); err != ErrMachineIdentityChanged {
+		t.Fatalf("expected empty machine fingerprint to fail identity verification, got %v", err)
+	}
+}
