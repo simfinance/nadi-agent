@@ -139,7 +139,6 @@ func machineFingerprint() (string, error) {
 	return "", errors.New("stable machine ID not found; expected /etc/machine-id or /var/lib/dbus/machine-id")
 }
 
-
 func validMachineID(machineID string) bool {
 	if len(machineID) != 32 {
 		return false
