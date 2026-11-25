@@ -672,7 +672,6 @@ func TestEnrollmentJournalRecoveryRequiresMatchingDirectoryFingerprint(t *testin
 	}
 }
 
-
 func TestRemoveProvisionJournalRejectsUncommittedPhase(t *testing.T) {
 	directory := t.TempDir()
 	journalPath := filepath.Join(directory, "journal.json")
