@@ -10,6 +10,7 @@ Paket ini disiapkan untuk simpiav2 Linux Ubuntu x86_64. Installer hanya memasang
 - Public key Activation Central tersedia di `/etc/nadi/keys/activation-public.pem` (Ed25519 PEM yang sudah digunakan sebelumnya).
 - Jangan menghapus, mengganti, atau menyalin `state.json` dari server lain. File tersebut berisi credential.
 - Tidak boleh ada direktori instalasi legacy `/var/lib/nadi-agent` atau `/etc/nadi-agent`. Installer menolak kondisi tersebut dan tidak memindahkan state/credential secara otomatis.
+- Akun sistem `nadi-agent` harus menggunakan home `/var/lib/nadi/state`; installer tidak mengubah home atau membership akun existing secara otomatis.
 
 ## 1. Verifikasi paket di server
 
@@ -55,6 +56,8 @@ Ekspektasi:
 - `/var/lib/nadi/state`: `700 nadi-agent:nadi-agent`
 - `/var/lib/nadi/spool`: `700 nadi-agent:nadi-agent`
 - `/var/lib/nadi/engines`: `700 nadi-agent:nadi-agent`
+- `/etc/nadi` dan `/etc/nadi/keys`: `750 root:nadi-agent`
+- `/etc/nadi/agent.env`: `640 root:nadi-agent`
 - `state.json`: `600 nadi-agent:nadi-agent`
 - Activation public key: `644 root:root`
 - Binary: `755 root:root`
