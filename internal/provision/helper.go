@@ -26,7 +26,6 @@ import (
 const (
 	agentAccountName        = "nadi-agent"
 	agentBinaryPath         = "/opt/nadi/bin/nadi-agent"
-	trustedProvisionHelperPath = "/usr/libexec/nadi/nadi-provision"
 	agentStateDirectory     = "/var/lib/nadi/state"
 	agentStateFile          = "/var/lib/nadi/state/state.json"
 	agentManifestPath       = "/etc/nadi/applications.json"
