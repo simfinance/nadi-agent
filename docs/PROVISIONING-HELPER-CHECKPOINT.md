@@ -393,3 +393,15 @@ No Central source or production host was modified. The helper remains source cod
 - [x] If `state.json` is missing while the existing integrity key or persistent `agent.lock` installation marker remains, Agent initialization fails closed and does not generate a replacement Agent identity or integrity key.
 - [x] Added regression coverage for missing state with a retained integrity key and for missing state plus integrity key with the persistent installation marker retained.
 - [ ] Latest Go validation workflow must complete successfully before this enforcement change is considered validated.
+
+## Trusted command path hardening — 2026-11-26
+
+- [x] Replaced the executable-only metadata check in `runTrustedCommand` with a dedicated trusted-path validator.
+- [x] Validate absolute canonical command paths, resolve trusted parent symlinks (including Ubuntu `/usr/sbin` usr-merge), and inspect every resolved parent directory.
+- [x] Require parent directories to be root-owned or owned by the expected runtime identity, and reject group/other-writable directories except root-owned sticky directories such as `/tmp`.
+- [x] Require the final executable to be a regular non-symlink file with the expected owner, executable permission, and no group/other write permission.
+- [x] Execute the resolved canonical executable path after validation, avoiding execution through the original parent symlink.
+- [x] Added regression tests for accepted executable paths, trusted parent symlink resolution, writable parent rejection, executable symlink rejection, and writable executable rejection.
+- [ ] Await a successful Go validation workflow on the final commit containing this hardening.
+
+This increment only hardens fixed OS command execution inside the Agent provisioning helper. It does not package or install the trusted helper, create sudoers policy, change the three-operation allowlist, or perform host provisioning.
