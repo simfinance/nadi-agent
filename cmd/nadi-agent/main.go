@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -19,7 +18,7 @@ import (
 )
 
 func main() {
-	if filepath.Base(os.Args[0]) == "nadi-provision" {
+	if isProvisionHelperInvocation(os.Args[0]) {
 		executablePath, err := os.Executable()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "unable to resolve provisioning helper executable")
