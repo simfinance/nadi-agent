@@ -78,3 +78,35 @@ func TestValidateInstalledHelperExecutableRejectsSymlink(t *testing.T) {
 		t.Fatal("symlinked helper must be rejected")
 	}
 }
+
+func TestValidateInstalledHelperExecutableRejectsSetIDPermissions(t *testing.T) {
+	tests := []struct {
+		name string
+		mode os.FileMode
+	}{
+		{name: "setuid", mode: 04755},
+		{name: "setgid", mode: 02755},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			executablePath := filepath.Join(directory, "nadi-provision")
+
+			if err := os.WriteFile(executablePath, []byte("#!/bin/sh\nexit 0\n"), test.mode); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(executablePath, test.mode); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := validateInstalledHelperExecutable(
+				executablePath,
+				executablePath,
+				uint32(os.Geteuid()),
+			); err == nil {
+				t.Fatalf("helper with %s permissions must be rejected", test.name)
+			}
+		})
+	}
+}
