@@ -84,8 +84,8 @@ func TestValidateInstalledHelperExecutableRejectsSetIDPermissions(t *testing.T) 
 		name string
 		mode os.FileMode
 	}{
-		{name: "setuid", mode: 04755},
-		{name: "setgid", mode: 02755},
+		{name: "setuid", mode: os.ModeSetuid | 0755},
+		{name: "setgid", mode: os.ModeSetgid | 0755},
 	}
 
 	for _, test := range tests {
@@ -93,7 +93,7 @@ func TestValidateInstalledHelperExecutableRejectsSetIDPermissions(t *testing.T) 
 			directory := t.TempDir()
 			executablePath := filepath.Join(directory, "nadi-provision")
 
-			if err := os.WriteFile(executablePath, []byte("#!/bin/sh\nexit 0\n"), test.mode); err != nil {
+			if err := os.WriteFile(executablePath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.Chmod(executablePath, test.mode); err != nil {
