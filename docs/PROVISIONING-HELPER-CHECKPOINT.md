@@ -402,6 +402,6 @@ No Central source or production host was modified. The helper remains source cod
 - [x] Require the final executable to be a regular non-symlink file with the expected owner, executable permission, and no group/other write permission.
 - [x] Execute the resolved canonical executable path after validation, avoiding execution through the original parent symlink.
 - [x] Added regression tests for accepted executable paths, trusted parent symlink resolution, writable parent rejection, executable symlink rejection, and writable executable rejection.
-- [ ] Await a successful Go validation workflow on the final commit containing this hardening.
+- [x] Agent workflow #448, run ID 45733474041, passed gofmt, unit tests, race tests, go vet, Linux AMD64 build, and Linux ARM64 build on source/test commit `8b604f195e0bd8571329904c4a11eff238b22778`: https://github.com/simfinance/nadi-agent/actions/runs/45733474041.
 
 This increment only hardens fixed OS command execution inside the Agent provisioning helper. It does not package or install the trusted helper, create sudoers policy, change the three-operation allowlist, or perform host provisioning.
