@@ -186,7 +186,6 @@ func TestSafeHelperMessageTruncatesLongErrors(t *testing.T) {
 	}
 }
 
-
 func TestAgentInstallationAssetsReuseVerifiedArtifactForHelper(t *testing.T) {
 	artifact := []byte("signed release artifact")
 	assets := agentInstallationAssets(artifact)
