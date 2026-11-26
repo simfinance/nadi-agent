@@ -17,6 +17,8 @@ const provisionJournalPath = "/etc/.nadi-provisioning-journal.json"
 
 var provisionJournalRollbackRoots = []string{
 	"/opt/nadi",
+	"/usr/libexec",
+	"/usr/libexec/nadi",
 	"/etc/nadi",
 	"/var/lib/nadi",
 	"/var/log/nadi",
@@ -90,6 +92,7 @@ func prepareAgentDirectoriesJournaled(
 	}{
 		{path: "/opt/nadi", mode: 0755, uid: 0, gid: 0},
 		{path: "/opt/nadi/bin", mode: 0755, uid: 0, gid: 0},
+		{path: "/usr/libexec/nadi", mode: 0755, uid: 0, gid: 0},
 		{path: "/etc/nadi", mode: 0750, uid: 0, gid: identity.gid},
 		{path: "/etc/nadi/keys", mode: 0750, uid: 0, gid: identity.gid},
 		{path: "/var/lib/nadi", mode: 0700, uid: identity.uid, gid: identity.gid},
@@ -343,6 +346,7 @@ func installAgentAssetsJournaled(
 		gid     int
 	}{
 		{path: agentBinaryPath, content: artifact, mode: 0755, uid: 0, gid: 0},
+		{path: trustedProvisionHelperPath, content: artifact, mode: 0755, uid: 0, gid: 0},
 		{path: activationPublicKeyPath, content: helperActivationPublicKey, mode: 0644, uid: 0, gid: 0},
 		{path: agentUnitPath, content: helperAgentUnit, mode: 0644, uid: 0, gid: 0},
 		{path: brokerUnitPath, content: helperBrokerUnit, mode: 0644, uid: 0, gid: 0},
