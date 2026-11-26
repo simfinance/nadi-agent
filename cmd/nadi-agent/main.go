@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -18,6 +19,16 @@ import (
 )
 
 func main() {
+	if filepath.Base(os.Args[0]) == "nadi-provision" {
+		executablePath, err := os.Executable()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "unable to resolve provisioning helper executable")
+			os.Exit(126)
+		}
+
+		os.Exit(runProvisionHelper(os.Args[1:], executablePath, os.Stdin, os.Stdout, os.Stderr))
+	}
+
 	showVersion := flag.Bool("version", false, "Print NADI Agent version")
 	enroll := flag.Bool("enroll", false, "Enroll this Agent with NADI Central")
 	manifestPath := flag.String("manifest", "", "Path to the Enrollment application manifest JSON")
