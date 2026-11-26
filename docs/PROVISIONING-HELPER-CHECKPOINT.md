@@ -405,3 +405,21 @@ No Central source or production host was modified. The helper remains source cod
 - [x] Agent workflow #448, run ID 45733474041, passed gofmt, unit tests, race tests, go vet, Linux AMD64 build, and Linux ARM64 build on source/test commit `8b604f195e0bd8571329904c4a11eff238b22778`: https://github.com/simfinance/nadi-agent/actions/runs/45733474041.
 
 This increment only hardens fixed OS command execution inside the Agent provisioning helper. It does not package or install the trusted helper, create sudoers policy, change the three-operation allowlist, or perform host provisioning.
+
+
+## Trusted helper single-artifact installation increment — 2026-11-26
+
+- [x] The fixed `/usr/libexec/nadi/nadi-provision` entrypoint is now a second invocation mode of the signed `cmd/nadi-agent` executable.
+- [x] Helper mode is selected by the `nadi-provision` executable basename and accepts only `--request-stdin`; it validates the resolved executable path before processing the request.
+- [x] Removed the separate `cmd/nadi-provision` build target so the privileged helper is not an independently built, unsigned secondary artifact.
+- [x] The `install_agent` asset list now installs the exact same verified artifact bytes to `/opt/nadi/bin/nadi-agent` and `/usr/libexec/nadi/nadi-provision`, both root:root mode 0755.
+- [x] The helper directory is prepared by the provisioning transaction and included in the journal rollback scope.
+- [x] Existing identity recovery verifies both installed binaries against the SHA-256 digest from the signed release manifest.
+- [x] Regression tests assert helper invocation selection, reject invalid helper arguments and paths, and prove both installed binary assets use byte-for-byte identical signed artifact content.
+- [ ] No disposable Ubuntu root installation test has been performed.
+- [ ] No sudoers policy is installed; the PHP-FPM/Artisan caller principal remains unresolved and must not be guessed.
+- [ ] No customer-facing release/package artifact or production installation is claimed.
+
+The implementation is in `cmd/nadi-agent/provision_helper.go`, `internal/provision/helper.go`, `internal/provision/journal_integration.go`, and `internal/provision/operations.go`, with corresponding tests. The signed release manifest schema and trusted release key were not changed.
+
+CI status at this checkpoint: workflow #45743235640 passed the previous helper-validator fixture correction. Workflow #45744162005 encountered a formatting-job push race while concurrent Agent commits were being added; the workflow bot subsequently committed the single gofmt cleanup as `da3765a619095589729598cf8cfed9cacb14847b`. Its follow-up workflow #45744256006 is marked `action_required`, so the latest single-artifact helper installation changes still require a fresh successful validation run.
