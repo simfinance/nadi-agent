@@ -338,7 +338,15 @@ func installAgentAssetsJournaled(
 		return errors.New("Agent artifact changed after signature and checksum verification")
 	}
 
-	for _, asset := range agentInstallationAssets(artifact) {
+	return installProvisionAssetsJournaled(agentInstallationAssets(artifact), store, journal)
+}
+
+func installProvisionAssetsJournaled(
+	assets []provisionAsset,
+	store *provisionJournalStore,
+	journal *provisionJournal,
+) error {
+	for _, asset := range assets {
 		if err := installImmutableFileJournaled(
 			asset.path,
 			asset.content,
