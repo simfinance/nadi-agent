@@ -338,21 +338,7 @@ func installAgentAssetsJournaled(
 		return errors.New("Agent artifact changed after signature and checksum verification")
 	}
 
-	assets := []struct {
-		path    string
-		content []byte
-		mode    os.FileMode
-		uid     int
-		gid     int
-	}{
-		{path: agentBinaryPath, content: artifact, mode: 0755, uid: 0, gid: 0},
-		{path: trustedProvisionHelperPath, content: artifact, mode: 0755, uid: 0, gid: 0},
-		{path: activationPublicKeyPath, content: helperActivationPublicKey, mode: 0644, uid: 0, gid: 0},
-		{path: agentUnitPath, content: helperAgentUnit, mode: 0644, uid: 0, gid: 0},
-		{path: brokerUnitPath, content: helperBrokerUnit, mode: 0644, uid: 0, gid: 0},
-	}
-
-	for _, asset := range assets {
+	for _, asset := range agentInstallationAssets(artifact) {
 		if err := installImmutableFileJournaled(
 			asset.path,
 			asset.content,
