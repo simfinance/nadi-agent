@@ -1,0 +1,80 @@
+package provision
+
+import (
+    "os"
+    "path/filepath"
+    "testing"
+)
+
+func TestValidateInstalledHelperExecutableAcceptsFixedRootOwnedPath(t *testing.T) {
+    directory := t.TempDir()
+    executablePath := filepath.Join(directory, "nadi-provision")
+
+    if err := os.WriteFile(executablePath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+        t.Fatal(err)
+    }
+
+    if err := validateInstalledHelperExecutable(
+        executablePath,
+        executablePath,
+        uint32(os.Geteuid()),
+    ); err != nil {
+        t.Fatalf("valid installed helper was rejected: %v", err)
+    }
+}
+
+func TestValidateInstalledHelperExecutableRejectsUnexpectedPath(t *testing.T) {
+    directory := t.TempDir()
+    executablePath := filepath.Join(directory, "nadi-provision")
+
+    if err := os.WriteFile(executablePath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+        t.Fatal(err)
+    }
+
+    expectedPath := filepath.Join(directory, "trusted", "nadi-provision")
+    if err := validateInstalledHelperExecutable(
+        executablePath,
+        expectedPath,
+        uint32(os.Geteuid()),
+    ); err == nil {
+        t.Fatal("helper outside the fixed installation path must be rejected")
+    }
+}
+
+func TestValidateInstalledHelperExecutableRejectsNonExecutableFile(t *testing.T) {
+    directory := t.TempDir()
+    executablePath := filepath.Join(directory, "nadi-provision")
+
+    if err := os.WriteFile(executablePath, []byte("not executable"), 0600); err != nil {
+        t.Fatal(err)
+    }
+
+    if err := validateInstalledHelperExecutable(
+        executablePath,
+        executablePath,
+        uint32(os.Geteuid()),
+    ); err == nil {
+        t.Fatal("non-executable helper must be rejected")
+    }
+}
+
+func TestValidateInstalledHelperExecutableRejectsSymlink(t *testing.T) {
+    directory := t.TempDir()
+    targetPath := filepath.Join(directory, "target")
+    executablePath := filepath.Join(directory, "nadi-provision")
+
+    if err := os.WriteFile(targetPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+        t.Fatal(err)
+    }
+    if err := os.Symlink(targetPath, executablePath); err != nil {
+        t.Fatal(err)
+    }
+
+    if err := validateInstalledHelperExecutable(
+        executablePath,
+        executablePath,
+        uint32(os.Geteuid()),
+    ); err == nil {
+        t.Fatal("symlinked helper must be rejected")
+    }
+}
