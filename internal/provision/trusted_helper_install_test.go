@@ -18,6 +18,7 @@ func TestValidateInstalledHelperExecutableAcceptsFixedRootOwnedPath(t *testing.T
 		executablePath,
 		executablePath,
 		uint32(os.Geteuid()),
+		uint32(os.Getegid()),
 	); err != nil {
 		t.Fatalf("valid installed helper was rejected: %v", err)
 	}
@@ -36,6 +37,7 @@ func TestValidateInstalledHelperExecutableRejectsUnexpectedPath(t *testing.T) {
 		executablePath,
 		expectedPath,
 		uint32(os.Geteuid()),
+		uint32(os.Getegid()),
 	); err == nil {
 		t.Fatal("helper outside the fixed installation path must be rejected")
 	}
@@ -53,6 +55,7 @@ func TestValidateInstalledHelperExecutableRejectsNonExecutableFile(t *testing.T)
 		executablePath,
 		executablePath,
 		uint32(os.Geteuid()),
+		uint32(os.Getegid()),
 	); err == nil {
 		t.Fatal("non-executable helper must be rejected")
 	}
@@ -74,6 +77,7 @@ func TestValidateInstalledHelperExecutableRejectsSymlink(t *testing.T) {
 		executablePath,
 		executablePath,
 		uint32(os.Geteuid()),
+		uint32(os.Getegid()),
 	); err == nil {
 		t.Fatal("symlinked helper must be rejected")
 	}
