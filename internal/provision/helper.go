@@ -45,6 +45,24 @@ var helperAgentUnit []byte
 //go:embed assets/nadi-handoff-broker.service
 var helperBrokerUnit []byte
 
+type provisionAsset struct {
+	path    string
+	content []byte
+	mode    os.FileMode
+	uid     int
+	gid     int
+}
+
+func agentInstallationAssets(artifact []byte) []provisionAsset {
+	return []provisionAsset{
+		{path: agentBinaryPath, content: artifact, mode: 0755, uid: 0, gid: 0},
+		{path: trustedProvisionHelperPath, content: artifact, mode: 0755, uid: 0, gid: 0},
+		{path: activationPublicKeyPath, content: helperActivationPublicKey, mode: 0644, uid: 0, gid: 0},
+		{path: agentUnitPath, content: helperAgentUnit, mode: 0644, uid: 0, gid: 0},
+		{path: brokerUnitPath, content: helperBrokerUnit, mode: 0644, uid: 0, gid: 0},
+	}
+}
+
 type HelperResponse struct {
 	ProtocolVersion  int    `json:"protocol_version"`
 	Success          bool   `json:"success"`
@@ -523,20 +541,10 @@ func installAgentAssets(artifactPath string, expectedDigest string) error {
 		return errors.New("Agent artifact changed after signature and checksum verification")
 	}
 
-	if err := installImmutableFile(agentBinaryPath, artifact, 0755, 0, 0); err != nil {
-		return fmt.Errorf("install Agent binary: %w", err)
-	}
-	if err := installImmutableFile(trustedProvisionHelperPath, artifact, 0755, 0, 0); err != nil {
-		return fmt.Errorf("install trusted provisioning helper: %w", err)
-	}
-	if err := installImmutableFile(activationPublicKeyPath, helperActivationPublicKey, 0644, 0, 0); err != nil {
-		return fmt.Errorf("install Activation Grant public key: %w", err)
-	}
-	if err := installImmutableFile(agentUnitPath, helperAgentUnit, 0644, 0, 0); err != nil {
-		return fmt.Errorf("install Agent systemd unit: %w", err)
-	}
-	if err := installImmutableFile(brokerUnitPath, helperBrokerUnit, 0644, 0, 0); err != nil {
-		return fmt.Errorf("install Broker systemd unit: %w", err)
+	for _, asset := range agentInstallationAssets(artifact) {
+		if err := installImmutableFile(asset.path, asset.content, asset.mode, asset.uid, asset.gid); err != nil {
+			return fmt.Errorf("install %s: %w", asset.path, err)
+		}
 	}
 
 	return nil
