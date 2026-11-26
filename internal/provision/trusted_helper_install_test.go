@@ -116,7 +116,6 @@ func TestValidateInstalledHelperExecutableRejectsSetIDPermissions(t *testing.T) 
 	}
 }
 
-
 func TestValidateInstalledHelperExecutableRejectsUnexpectedGroup(t *testing.T) {
 	directory := t.TempDir()
 	executablePath := filepath.Join(directory, "nadi-provision")
