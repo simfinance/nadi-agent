@@ -108,9 +108,50 @@ func TestValidateInstalledHelperExecutableRejectsSetIDPermissions(t *testing.T) 
 				executablePath,
 				executablePath,
 				uint32(os.Geteuid()),
+				uint32(os.Getegid()),
 			); err == nil {
 				t.Fatalf("helper with %s permissions must be rejected", test.name)
 			}
 		})
+	}
+}
+
+
+func TestValidateInstalledHelperExecutableRejectsUnexpectedGroup(t *testing.T) {
+	directory := t.TempDir()
+	executablePath := filepath.Join(directory, "nadi-provision")
+
+	if err := os.WriteFile(executablePath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := validateInstalledHelperExecutable(
+		executablePath,
+		executablePath,
+		uint32(os.Geteuid()),
+		uint32(os.Getegid()+1),
+	); err == nil {
+		t.Fatal("helper with an unexpected group must be rejected")
+	}
+}
+
+func TestValidateInstalledHelperExecutableRejectsNonCanonicalMode(t *testing.T) {
+	directory := t.TempDir()
+	executablePath := filepath.Join(directory, "nadi-provision")
+
+	if err := os.WriteFile(executablePath, []byte("#!/bin/sh\nexit 0\n"), 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(executablePath, 0750); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := validateInstalledHelperExecutable(
+		executablePath,
+		executablePath,
+		uint32(os.Geteuid()),
+		uint32(os.Getegid()),
+	); err == nil {
+		t.Fatal("helper with a mode other than 0755 must be rejected")
 	}
 }
