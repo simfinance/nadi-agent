@@ -784,23 +784,33 @@ func reconcileRestoreMetadata(
 }
 
 func verifyInstalledAgentBinaryDigest(expectedSHA256 string) error {
-	content, err := readRootOwnedRegularFile(agentBinaryPath, maximumArtifactBytes)
-	if err != nil {
-		return errors.New("existing Agent binary is missing or unsafe; identity restore requires a verified installed binary")
+	installedBinaries := []struct {
+		path string
+		name string
+	}{
+		{path: agentBinaryPath, name: "Agent"},
+		{path: trustedProvisionHelperPath, name: "trusted provisioning helper"},
 	}
 
-	metadata, err := os.Lstat(agentBinaryPath)
-	if err != nil {
-		return err
-	}
-	stat, ok := metadata.Sys().(*syscall.Stat_t)
-	if !ok || stat.Uid != 0 || stat.Gid != 0 || metadata.Mode().Perm() != 0755 {
-		return errors.New("existing Agent binary ownership or permissions are invalid")
-	}
+	for _, binary := range installedBinaries {
+		content, err := readRootOwnedRegularFile(binary.path, maximumArtifactBytes)
+		if err != nil {
+			return fmt.Errorf("existing %s binary is missing or unsafe; identity restore requires a verified installed binary", binary.name)
+		}
 
-	digest := sha256.Sum256(content)
-	if hex.EncodeToString(digest[:]) != expectedSHA256 {
-		return errors.New("existing Agent binary does not match the verified release; automatic binary replacement is prohibited")
+		metadata, err := os.Lstat(binary.path)
+		if err != nil {
+			return err
+		}
+		stat, ok := metadata.Sys().(*syscall.Stat_t)
+		if !ok || stat.Uid != 0 || stat.Gid != 0 || metadata.Mode().Perm() != 0755 {
+			return fmt.Errorf("existing %s binary ownership or permissions are invalid", binary.name)
+		}
+
+		digest := sha256.Sum256(content)
+		if hex.EncodeToString(digest[:]) != expectedSHA256 {
+			return fmt.Errorf("existing %s binary does not match the verified release; automatic binary replacement is prohibited", binary.name)
+		}
 	}
 
 	return nil
