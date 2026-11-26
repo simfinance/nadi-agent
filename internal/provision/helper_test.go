@@ -185,3 +185,39 @@ func TestSafeHelperMessageTruncatesLongErrors(t *testing.T) {
 		t.Fatalf("helper message exceeded 512 bytes: %d", len(message))
 	}
 }
+
+
+func TestAgentInstallationAssetsReuseVerifiedArtifactForHelper(t *testing.T) {
+	artifact := []byte("signed release artifact")
+	assets := agentInstallationAssets(artifact)
+
+	var agentBinary *provisionAsset
+	var helperBinary *provisionAsset
+
+	for index := range assets {
+		switch assets[index].path {
+		case agentBinaryPath:
+			agentBinary = &assets[index]
+		case trustedProvisionHelperPath:
+			helperBinary = &assets[index]
+		}
+	}
+
+	if agentBinary == nil || helperBinary == nil {
+		t.Fatal("Agent binary and trusted helper must both be installation assets")
+	}
+
+	if !bytes.Equal(agentBinary.content, artifact) || !bytes.Equal(helperBinary.content, artifact) {
+		t.Fatal("Agent and helper must use the exact verified release artifact bytes")
+	}
+
+	if !bytes.Equal(agentBinary.content, helperBinary.content) {
+		t.Fatal("Agent and helper installation assets must be byte-for-byte identical")
+	}
+
+	for _, binary := range []*provisionAsset{agentBinary, helperBinary} {
+		if binary.mode != 0755 || binary.uid != 0 || binary.gid != 0 {
+			t.Fatalf("binary %s must be installed root:root mode 0755", binary.path)
+		}
+	}
+}
