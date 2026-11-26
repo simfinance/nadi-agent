@@ -31,7 +31,7 @@ The second file must be copied byte-for-byte from the already verified staged ar
 
 The executable selects helper mode only when invoked with the `nadi-provision` basename. It then validates its resolved executable path against the fixed helper path before reading or dispatching the request. Invoking the same binary under the Agent name continues to use the normal Agent CLI.
 
-This reuses the existing signed Agent artifact contract without changing the release manifest schema or inventing a second signing key. The fixed-path installation and byte-for-byte copy are design requirements; the root-owned installer that performs them is not yet implemented.
+This reuses the existing signed Agent artifact contract without changing the release manifest schema or inventing a second signing key. The root-owned `install_agent` transaction now stages the same verified artifact at both destinations through its journaled immutable-file installer. Both copies are root:root mode 0755, and the helper destination is covered by the install rollback roots. Recovery verification checks that both installed binaries still match the signed artifact digest. This is source-level implementation only; no host installation or privileged integration test has been performed.
 
 ## Runtime self-validation
 
@@ -49,8 +49,8 @@ The helper reuses the trusted command path validator for the parent-directory ch
 
 ## What remains intentionally unimplemented
 
-- No package or release artifact currently installs the helper at the fixed path.
-- No installer currently copies the verified Agent artifact byte-for-byte to the helper destination.
+- No customer-facing package or production release currently ships the helper at the fixed path.
+- The Agent-side `install_agent` implementation copies the verified artifact byte-for-byte to the helper destination, but this has not been validated on a disposable Ubuntu host.
 - No Composer script installs, replaces, or invokes the root-owned helper.
 - No sudoers file is generated or installed.
 - No caller principal or shared privilege group is inferred. The exact PHP-FPM/Artisan execution identity and narrow sudoers rule require an approved runtime identity contract.
