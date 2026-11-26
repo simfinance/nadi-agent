@@ -26,6 +26,7 @@ import (
 const (
 	agentAccountName        = "nadi-agent"
 	agentBinaryPath         = "/opt/nadi/bin/nadi-agent"
+	trustedProvisionHelperPath = "/usr/libexec/nadi/nadi-provision"
 	agentStateDirectory     = "/var/lib/nadi/state"
 	agentStateFile          = "/var/lib/nadi/state/state.json"
 	agentManifestPath       = "/etc/nadi/applications.json"
@@ -483,6 +484,7 @@ func prepareAgentDirectories(identity helperRuntimeIdentity) error {
 	}{
 		{path: "/opt/nadi", mode: 0755, uid: 0, gid: 0},
 		{path: "/opt/nadi/bin", mode: 0755, uid: 0, gid: 0},
+		{path: "/usr/libexec/nadi", mode: 0755, uid: 0, gid: 0},
 		{path: "/etc/nadi", mode: 0750, uid: 0, gid: identity.gid},
 		{path: "/etc/nadi/keys", mode: 0750, uid: 0, gid: identity.gid},
 		{path: "/var/lib/nadi", mode: 0700, uid: identity.uid, gid: identity.gid},
@@ -524,6 +526,9 @@ func installAgentAssets(artifactPath string, expectedDigest string) error {
 
 	if err := installImmutableFile(agentBinaryPath, artifact, 0755, 0, 0); err != nil {
 		return fmt.Errorf("install Agent binary: %w", err)
+	}
+	if err := installImmutableFile(trustedProvisionHelperPath, artifact, 0755, 0, 0); err != nil {
+		return fmt.Errorf("install trusted provisioning helper: %w", err)
 	}
 	if err := installImmutableFile(activationPublicKeyPath, helperActivationPublicKey, 0644, 0, 0); err != nil {
 		return fmt.Errorf("install Activation Grant public key: %w", err)
