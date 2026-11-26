@@ -49,8 +49,8 @@ func validateTrustedCommandPath(path string, expectedUID uint32) (string, error)
 		}
 
 		stat, ok := directory.Sys().(*syscall.Stat_t)
-		if !ok || stat.Uid != expectedUID {
-			return "", errors.New("trusted system command parent directories must have the expected owner")
+		if !ok || (stat.Uid != 0 && stat.Uid != expectedUID) {
+			return "", errors.New("trusted system command parent directories must be root-owned or owned by the expected runtime")
 		}
 		if directory.Mode().Perm()&0022 != 0 &&
 			!(stat.Uid == 0 && directory.Mode()&os.ModeSticky != 0) {
