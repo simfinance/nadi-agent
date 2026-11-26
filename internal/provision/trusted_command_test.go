@@ -87,7 +87,10 @@ func TestValidateTrustedCommandPathRejectsSymlinkExecutable(t *testing.T) {
 func TestValidateTrustedCommandPathRejectsWritableExecutable(t *testing.T) {
 	directory := t.TempDir()
 	commandPath := filepath.Join(directory, "systemctl")
-	if err := os.WriteFile(commandPath, []byte("#!/bin/sh\nexit 0\n"), 0777); err != nil {
+	if err := os.WriteFile(commandPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(commandPath, 0777); err != nil {
 		t.Fatal(err)
 	}
 
