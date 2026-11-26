@@ -3,9 +3,14 @@ package main
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 
 	"nadi-agent/internal/provision"
 )
+
+func isProvisionHelperInvocation(executableName string) bool {
+	return filepath.Base(executableName) == "nadi-provision"
+}
 
 func runProvisionHelper(
 	args []string,
