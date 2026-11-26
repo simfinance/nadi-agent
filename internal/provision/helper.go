@@ -718,22 +718,15 @@ func activateAgentServices() error {
 }
 
 func runTrustedCommand(path string, arguments ...string) ([]byte, error) {
-	metadata, err := os.Lstat(path)
+	resolvedPath, err := validateTrustedCommandPath(path, 0)
 	if err != nil {
-		return nil, fmt.Errorf("trusted system command %s is unavailable: %w", path, err)
-	}
-	if metadata.Mode()&os.ModeSymlink != 0 || !metadata.Mode().IsRegular() || metadata.Mode().Perm()&0022 != 0 {
-		return nil, fmt.Errorf("trusted system command %s has unsafe file metadata", path)
-	}
-	stat, ok := metadata.Sys().(*syscall.Stat_t)
-	if !ok || stat.Uid != 0 || metadata.Mode().Perm()&0111 == 0 {
-		return nil, fmt.Errorf("trusted system command %s must be root-owned and executable", path)
+		return nil, err
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	command := exec.CommandContext(ctx, path, arguments...)
+	command := exec.CommandContext(ctx, resolvedPath, arguments...)
 	command.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin"}
 	output, err := command.CombinedOutput()
 	if err != nil {
