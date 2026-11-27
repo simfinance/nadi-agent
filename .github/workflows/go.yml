@@ -162,7 +162,7 @@ jobs:
                           "$temporary_directory/test-signing-private.pem" \
                           "$package_path" \
                           "$temporary_directory/invalid-manifest.json" \
-                          "$temporary_directory/invalid-manifest.sig" \
+                          "$temporary_directory/invalid-manifest.sig.b64" \
                           "$binary_path" \
                           "$architecture" \
                           "$package_path.production-test.sig" 2>"$temporary_directory/sign-error.txt"; then
