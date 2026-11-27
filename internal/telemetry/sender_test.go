@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -967,5 +968,81 @@ func TestBuildPendingRejectsNginxErrorLogsWithApplicationID(t *testing.T) {
 	}})
 	if err == nil {
 		t.Fatal("expected application_id on server-scoped Nginx log to be rejected")
+	}
+}
+
+
+func TestSenderConcurrentPendingInspectionAndCompletionIsRaceSafe(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var batch Batch
+		if err := json.NewDecoder(request.Body).Decode(&batch); err != nil {
+			t.Errorf("decode telemetry request: %v", err)
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		ack := Ack{Success: true}
+		ack.Data.Success = true
+		ack.Data.BatchID = batch.BatchID
+		ack.Data.Status = "accepted"
+		ack.Data.RecordCount = len(batch.Records)
+		ack.Data.AcceptedCount = len(batch.Records)
+
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(ack); err != nil {
+			t.Errorf("encode telemetry acknowledgement: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	sender, err := NewSender("https://central.example", t.TempDir(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender.baseURL = server.URL
+
+	instanceID := "123e4567-e89b-42d3-a456-426614174000"
+	input := InputRecord{
+		Stream:      "server_metrics",
+		ObservedAt:  time.Now().UTC(),
+		CollectedAt: time.Now().UTC(),
+		Data:        json.RawMessage(`{"cpu":10}`),
+		Source: Source{
+			Kind:    "server",
+			EventID: "event-1",
+		},
+	}
+
+	const workers = 12
+	var wait sync.WaitGroup
+	errorsFound := make(chan error, workers*2)
+
+	for index := 0; index < workers; index++ {
+		wait.Add(2)
+		go func() {
+			defer wait.Done()
+			_, sendErr := sender.Send(context.Background(), "agent-1", instanceID, "credential", []InputRecord{input})
+			if sendErr != nil {
+				errorsFound <- sendErr
+			}
+		}()
+		go func() {
+			defer wait.Done()
+			_, _, inspectErr := sender.PendingSources()
+			if inspectErr != nil {
+				errorsFound <- inspectErr
+			}
+		}()
+	}
+
+	wait.Wait()
+	close(errorsFound)
+
+	for concurrentErr := range errorsFound {
+		t.Errorf("concurrent sender operation failed: %v", concurrentErr)
+	}
+
+	if err := sender.Complete(); err != nil {
+		t.Fatalf("complete pending batch: %v", err)
 	}
 }

@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -133,6 +134,7 @@ type Ack struct {
 }
 
 type Sender struct {
+	mu      sync.RWMutex
 	baseURL string
 	client  *http.Client
 	dir     string
@@ -176,6 +178,9 @@ func IsServerStream(stream string) bool {
 }
 
 func (s *Sender) Send(ctx context.Context, agentID string, instanceID string, credential string, inputs []InputRecord) ([]Source, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if strings.TrimSpace(agentID) == "" || strings.TrimSpace(instanceID) == "" || strings.TrimSpace(credential) == "" {
 		return nil, errors.New("Agent ID, Agent instance ID, and credential are required for telemetry delivery")
 	}
@@ -313,6 +318,13 @@ func (s *Sender) Send(ctx context.Context, agentID string, instanceID string, cr
 	return nil, errors.New("telemetry delivery ended without a result")
 }
 func (s *Sender) Complete() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.completePending()
+}
+
+func (s *Sender) completePending() error {
 	pending, err := s.loadPending()
 	if err != nil {
 		return err
@@ -333,6 +345,9 @@ func (s *Sender) Complete() error {
 }
 
 func (s *Sender) PendingSources() ([]Source, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	pending, err := s.loadPending()
 	if err != nil {
 		return nil, false, err
@@ -346,6 +361,9 @@ func (s *Sender) PendingSources() ([]Source, bool, error) {
 }
 
 func (s *Sender) DiscardPending() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	pending, err := s.loadPending()
 	if err != nil {
 		return err
@@ -644,7 +662,7 @@ func (s *Sender) acknowledgedSourcesOrAdvance(pending *pendingBatch) ([]Source, 
 		pending.Following,
 	)
 	if len(sources) == 0 && len(pending.Following) > 0 {
-		if err := s.Complete(); err != nil {
+		if err := s.completePending(); err != nil {
 			return nil, fmt.Errorf("advance acknowledged split batch: %w", err)
 		}
 		return nil, nil
