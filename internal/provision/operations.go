@@ -1455,26 +1455,6 @@ func sameCentralSourceIPs(installed []string, requested []string) bool {
 	return true
 }
 
-func sameCentralSourceIPs(installed []string, requested []string) bool {
-	normalizedInstalled, installedErr := normalizeCentralSourceIPs(installed)
-	normalizedRequested, requestedErr := normalizeCentralSourceIPs(requested)
-	if installedErr != nil || requestedErr != nil || len(normalizedInstalled) != len(normalizedRequested) {
-		return false
-	}
-
-	installedSet := make(map[string]struct{}, len(normalizedInstalled))
-	for _, address := range normalizedInstalled {
-		installedSet[address] = struct{}{}
-	}
-	for _, address := range normalizedRequested {
-		if _, exists := installedSet[address]; !exists {
-			return false
-		}
-	}
-
-	return true
-}
-
 func sameApplicationInventory(installed []ProvisionApplication, requested []ProvisionApplication) bool {
 	if len(installed) != len(requested) {
 		return false
