@@ -44,12 +44,7 @@ func main() {
         fail(err)
     }
 
-    fmt.Printf("%s\t%s\t%s\t%s\n",
-        manifest.Version,
-        artifact.Architecture,
-        artifact.Filename,
-        artifact.SHA256,
-    )
+    fmt.Print(formatReleaseMetadata(manifest, artifact))
 }
 
 func readRegularFile(path string, maximumSize int64) ([]byte, error) {
