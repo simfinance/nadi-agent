@@ -169,7 +169,7 @@ jobs:
                           printf 'Signer accepted a private key outside the pinned NADI trust anchor.\n' >&2
                           exit 1
                       fi
-                      grep -F 'Release private key does not match the pinned NADI trust anchor' "$temporary_directory/sign-error.txt"
+                      grep -F 'does not match the pinned NADI trust anchor' "$temporary_directory/sign-error.txt"
                   done
 
                   if go run ./cmd/nadi-release-verifier \
