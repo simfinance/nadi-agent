@@ -45,6 +45,21 @@ func TestVerifierRejectsExpiredGrant(t *testing.T) {
 	}
 }
 
+func TestValidateGrantTimesRejectsExpiryBeforeIssuance(t *testing.T) {
+	now := time.Now().UTC()
+	issuedAt := now.Add(-time.Minute)
+	expiresAt := issuedAt
+
+	if err := validateGrantTimes(issuedAt, expiresAt, now); err == nil {
+		t.Fatal("expected grant expiry at issuance time to be rejected")
+	}
+
+	expiresAt = issuedAt.Add(-time.Second)
+	if err := validateGrantTimes(issuedAt, expiresAt, now); err == nil {
+		t.Fatal("expected grant expiry before issuance time to be rejected")
+	}
+}
+
 func TestVerifierAcceptsEnvelopeExpiryTruncatedToSeconds(t *testing.T) {
 	verifier, grant, application, agentState, now := createSignedGrant(t)
 	grant.ExpiresAt = now.Add(24 * time.Hour).Format(time.RFC3339)

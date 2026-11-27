@@ -1,9 +1,11 @@
 package state
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -42,16 +44,17 @@ type PendingAcknowledgement struct {
 }
 
 type EnrolledApplication struct {
-	ApplicationID         string `json:"application_id"`
-	ApplicationKey        string `json:"application_key"`
-	ApplicationName       string `json:"application_name"`
-	Environment           string `json:"environment"`
-	RegistrationID        string `json:"registration_id"`
-	RegistrationStatus    string `json:"registration_status"`
-	ActivationStatus      string `json:"activation_status"`
-	MonitoringStatus      string `json:"monitoring_status"`
-	Endpoint              string `json:"endpoint"`
-	ApplicationCredential string `json:"application_credential"`
+	ApplicationID             string `json:"application_id"`
+	ApplicationKey            string `json:"application_key"`
+	ApplicationName           string `json:"application_name"`
+	Environment               string `json:"environment"`
+	RegistrationID            string `json:"registration_id"`
+	RegistrationStatus        string `json:"registration_status"`
+	ActivationStatus          string `json:"activation_status"`
+	MonitoringStatus          string `json:"monitoring_status"`
+	Endpoint                  string `json:"endpoint"`
+	ApplicationCredential     string `json:"application_credential"`
+	BridgeCredentialPublished bool   `json:"bridge_credential_published,omitempty"`
 }
 
 type CredentialRotation struct {
@@ -66,6 +69,7 @@ type CredentialRotation struct {
 
 type State struct {
 	SchemaVersion             int                      `json:"schema_version"`
+	IntegritySignature        string                   `json:"integrity_signature"`
 	AgentInstanceID           string                   `json:"agent_instance_id"`
 	Hostname                  string                   `json:"hostname"`
 	MachineFingerprint        string                   `json:"machine_fingerprint"`
@@ -88,15 +92,21 @@ type State struct {
 }
 
 type Store struct {
-	directory string
-	lockFile  *os.File
-	mutex     sync.Mutex
-	closed    bool
+	directory    string
+	lockFile     *os.File
+	privateKey   []byte
+	freshInstall bool
+	mutex        sync.Mutex
+	closed       bool
 }
 
 func Open(directory string) (*Store, error) {
 	if directory == "" {
 		return nil, errors.New("state directory must not be empty")
+	}
+
+	if err := rejectLegacyStateLayout(directory); err != nil {
+		return nil, err
 	}
 
 	if err := os.MkdirAll(directory, 0700); err != nil {
@@ -108,6 +118,12 @@ func Open(directory string) (*Store, error) {
 	}
 
 	lockPath := filepath.Join(directory, "agent.lock")
+	_, lockStatErr := os.Lstat(lockPath)
+	existingInstallMarker := lockStatErr == nil
+	if lockStatErr != nil && !errors.Is(lockStatErr, os.ErrNotExist) {
+		return nil, fmt.Errorf("inspect Agent installation marker: %w", lockStatErr)
+	}
+
 	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("open agent lock: %w", err)
@@ -123,10 +139,26 @@ func Open(directory string) (*Store, error) {
 		return nil, fmt.Errorf("another NADI Agent process may already be running: %w", err)
 	}
 
+	privateKey, freshInstall, err := loadOrCreateIntegrityKey(directory, existingInstallMarker)
+	if err != nil {
+		syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+		lockFile.Close()
+		return nil, fmt.Errorf("load Agent state integrity key: %w", err)
+	}
+
 	return &Store{
-		directory: directory,
-		lockFile:  lockFile,
+		directory:    directory,
+		lockFile:     lockFile,
+		privateKey:   privateKey,
+		freshInstall: freshInstall,
 	}, nil
+}
+
+func (s *Store) IsFreshInstallation() bool {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	return !s.closed && s.freshInstall
 }
 
 func (s *Store) Load() (State, error) {
@@ -163,6 +195,105 @@ func (s *Store) Load() (State, error) {
 	if current.AgentInstanceID == "" {
 		return State{}, errors.New("agent state has an empty agent_instance_id")
 	}
+	if err := verifyIntegrity(current, ed25519.PrivateKey(s.privateKey).Public().(ed25519.PublicKey)); err != nil {
+		return State{}, fmt.Errorf("verify Agent state integrity: %w", err)
+	}
+
+	return current, nil
+}
+
+func LoadReadOnly(directory string) (State, error) {
+	if directory == "" || !filepath.IsAbs(directory) || filepath.Clean(directory) != directory {
+		return State{}, errors.New("state directory must be absolute and canonical")
+	}
+
+	if err := rejectLegacyStateLayout(directory); err != nil {
+		return State{}, err
+	}
+
+	directoryMetadata, err := os.Lstat(directory)
+	if err != nil {
+		return State{}, fmt.Errorf("inspect Agent state directory: %w", err)
+	}
+
+	directoryStat, ok := directoryMetadata.Sys().(*syscall.Stat_t)
+	if !ok ||
+		directoryMetadata.Mode()&os.ModeSymlink != 0 ||
+		!directoryMetadata.IsDir() ||
+		directoryStat.Uid != uint32(os.Geteuid()) ||
+		directoryMetadata.Mode().Perm() != 0700 {
+		return State{}, errors.New("Agent state directory ownership or permissions are unsafe")
+	}
+
+	path := filepath.Join(directory, "state.json")
+	pathMetadata, err := os.Lstat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return State{}, ErrNotFound
+		}
+
+		return State{}, fmt.Errorf("inspect persisted Agent state: %w", err)
+	}
+
+	pathStat, ok := pathMetadata.Sys().(*syscall.Stat_t)
+	if !ok ||
+		pathMetadata.Mode()&os.ModeSymlink != 0 ||
+		!pathMetadata.Mode().IsRegular() ||
+		pathStat.Uid != uint32(os.Geteuid()) ||
+		pathMetadata.Mode().Perm() != 0600 ||
+		pathMetadata.Size() < 1 ||
+		pathMetadata.Size() > 1<<20 {
+		return State{}, errors.New("persisted Agent state ownership, permissions, or size are unsafe")
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return State{}, fmt.Errorf("open persisted Agent state: %w", err)
+	}
+	defer file.Close()
+
+	openedMetadata, err := file.Stat()
+	if err != nil {
+		return State{}, fmt.Errorf("inspect opened Agent state: %w", err)
+	}
+
+	openedStat, ok := openedMetadata.Sys().(*syscall.Stat_t)
+	if !ok ||
+		openedStat.Dev != pathStat.Dev ||
+		openedStat.Ino != pathStat.Ino ||
+		openedStat.Uid != uint32(os.Geteuid()) ||
+		!openedMetadata.Mode().IsRegular() ||
+		openedMetadata.Mode().Perm() != 0600 {
+		return State{}, errors.New("Agent state changed during read-only verification")
+	}
+
+	content, err := io.ReadAll(io.LimitReader(file, (1<<20)+1))
+	if err != nil {
+		return State{}, fmt.Errorf("read persisted Agent state: %w", err)
+	}
+	if len(content) == 0 || len(content) > 1<<20 {
+		return State{}, errors.New("persisted Agent state is empty or exceeds the size limit")
+	}
+
+	var current State
+	if err := json.Unmarshal(content, &current); err != nil {
+		return State{}, fmt.Errorf("decode persisted Agent state: %w", err)
+	}
+
+	if current.SchemaVersion != CurrentSchemaVersion {
+		return State{}, fmt.Errorf("unsupported Agent state schema version %d", current.SchemaVersion)
+	}
+	if current.AgentInstanceID == "" {
+		return State{}, errors.New("persisted Agent state has an empty agent_instance_id")
+	}
+
+	privateKey, err := loadExistingIntegrityKey(directory)
+	if err != nil {
+		return State{}, fmt.Errorf("load Agent state integrity key: %w", err)
+	}
+	if err := verifyIntegrity(current, privateKey.Public().(ed25519.PublicKey)); err != nil {
+		return State{}, fmt.Errorf("verify Agent state integrity: %w", err)
+	}
 
 	return current, nil
 }
@@ -181,6 +312,9 @@ func (s *Store) Save(current State) error {
 
 	current.SchemaVersion = CurrentSchemaVersion
 	current.UpdatedAt = time.Now().UTC()
+	if err := signIntegrity(&current, ed25519.PrivateKey(s.privateKey)); err != nil {
+		return fmt.Errorf("sign Agent state integrity: %w", err)
+	}
 
 	content, err := json.MarshalIndent(current, "", "    ")
 	if err != nil {
@@ -253,6 +387,33 @@ func (s *Store) Close() error {
 
 	if closeErr != nil {
 		return fmt.Errorf("close agent process lock: %w", closeErr)
+	}
+
+	return nil
+}
+
+func rejectLegacyStateLayout(directory string) error {
+	if filepath.Base(directory) != "state" || filepath.Base(filepath.Dir(directory)) != "nadi" {
+		return nil
+	}
+
+	legacyRoot := filepath.Dir(directory)
+	legacyArtifacts := []string{
+		"state.json",
+		"state-integrity-private.pem",
+		"agent.lock",
+		"log-dedupe",
+		"nginx-error-log-cursor.json",
+		"telemetry-delivery",
+	}
+
+	for _, artifact := range legacyArtifacts {
+		path := filepath.Join(legacyRoot, artifact)
+		if _, err := os.Lstat(path); err == nil {
+			return fmt.Errorf("legacy Agent persistent data detected at %s; recovery is required before using the canonical state directory", artifact)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect legacy Agent persistent data: %w", err)
+		}
 	}
 
 	return nil

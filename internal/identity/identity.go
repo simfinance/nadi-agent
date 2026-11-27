@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -46,6 +47,10 @@ func Ensure(store *state.Store) (state.State, error) {
 		return state.State{}, err
 	}
 
+	if !store.IsFreshInstallation() {
+		return state.State{}, errors.New("Agent state is missing from an existing installation; recovery is required and a new identity will not be created")
+	}
+
 	instanceID, err := newUUID()
 	if err != nil {
 		return state.State{}, fmt.Errorf("generate agent instance ID: %w", err)
@@ -68,6 +73,53 @@ func Ensure(store *state.Store) (state.State, error) {
 	return current, nil
 }
 
+func VerifyReadOnly(directory string) (state.State, error) {
+	current, err := state.LoadReadOnly(directory)
+	if err != nil {
+		return state.State{}, fmt.Errorf("load persisted Agent identity: %w", err)
+	}
+
+	fingerprint, err := machineFingerprint()
+	if err != nil {
+		return state.State{}, err
+	}
+
+	if current.MachineFingerprint == "" || current.MachineFingerprint != fingerprint {
+		return state.State{}, ErrMachineIdentityChanged
+	}
+
+	if current.EnrollmentStatus != "registered" ||
+		current.AgentInstanceID == "" ||
+		current.CentralAgentID == "" ||
+		current.CentralServerID == "" {
+		return state.State{}, errors.New("persisted Agent enrollment identity is incomplete")
+	}
+
+	if len(current.Applications) < 1 || len(current.Applications) > 20 {
+		return state.State{}, errors.New("persisted Agent application identity count is invalid")
+	}
+
+	applicationIDs := make(map[string]struct{}, len(current.Applications))
+	registrationIDs := make(map[string]struct{}, len(current.Applications))
+	for _, application := range current.Applications {
+		if application.ApplicationID == "" || application.RegistrationID == "" {
+			return state.State{}, errors.New("persisted Agent application identity is incomplete or duplicated")
+		}
+
+		if _, exists := applicationIDs[application.ApplicationID]; exists {
+			return state.State{}, errors.New("persisted Agent application identity is incomplete or duplicated")
+		}
+		if _, exists := registrationIDs[application.RegistrationID]; exists {
+			return state.State{}, errors.New("persisted Agent application identity is incomplete or duplicated")
+		}
+
+		applicationIDs[application.ApplicationID] = struct{}{}
+		registrationIDs[application.RegistrationID] = struct{}{}
+	}
+
+	return current, nil
+}
+
 func machineFingerprint() (string, error) {
 	paths := []string{
 		"/etc/machine-id",
@@ -75,21 +127,63 @@ func machineFingerprint() (string, error) {
 	}
 
 	for _, path := range paths {
-		content, err := os.ReadFile(path)
+		machineID, err := readMachineID(path)
 		if err != nil {
 			continue
 		}
 
-		machineID := strings.TrimSpace(string(content))
-		if machineID == "" {
+		machineIDBytes, valid := decodeMachineID(machineID)
+		if !valid {
 			continue
 		}
 
-		digest := sha256.Sum256([]byte(machineID))
+		digest := sha256.Sum256(machineIDBytes)
 		return hex.EncodeToString(digest[:]), nil
 	}
 
 	return "", errors.New("stable machine ID not found; expected /etc/machine-id or /var/lib/dbus/machine-id")
+}
+
+func readMachineID(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(io.LimitReader(file, 65))
+	if err != nil {
+		return "", err
+	}
+	if len(content) > 64 {
+		return "", errors.New("machine ID file exceeds the size limit")
+	}
+
+	return strings.TrimSpace(string(content)), nil
+}
+
+func validMachineID(machineID string) bool {
+	_, valid := decodeMachineID(machineID)
+	return valid
+}
+
+func decodeMachineID(machineID string) ([]byte, bool) {
+	if len(machineID) != 32 {
+		return nil, false
+	}
+
+	decoded, err := hex.DecodeString(machineID)
+	if err != nil || len(decoded) != 16 {
+		return nil, false
+	}
+
+	for _, value := range decoded {
+		if value != 0 {
+			return decoded, true
+		}
+	}
+
+	return nil, false
 }
 
 func newUUID() (string, error) {

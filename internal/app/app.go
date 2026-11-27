@@ -15,6 +15,7 @@ import (
 	"nadi-agent/internal/appspool"
 	"nadi-agent/internal/config"
 	"nadi-agent/internal/control"
+	"nadi-agent/internal/handoff"
 	"nadi-agent/internal/identity"
 	"nadi-agent/internal/logdedupe"
 	"nadi-agent/internal/nginxlogs"
@@ -35,9 +36,17 @@ type App struct {
 	applicationSpool   *appspool.Store
 	telemetrySender    *telemetry.Sender
 	logDedupe          *logdedupe.Store
+	handoffClient      *handoff.Client
 }
 
 func New(cfg config.Config, logger *slog.Logger) *App {
+	socketPath := cfg.HandoffSocketPath
+	if socketPath == "" {
+		socketPath = "/run/nadi/credential-handoff.sock"
+	}
+
+	handoffClient, _ := handoff.NewClient(socketPath, 2*time.Second)
+
 	return &App{
 		config: cfg,
 		logger: logger,
@@ -48,6 +57,7 @@ func New(cfg config.Config, logger *slog.Logger) *App {
 		),
 		serverMetrics:      servermetrics.NewCollector(),
 		applicationMetrics: appmonitor.NewCollector(cfg.HTTPTimeout),
+		handoffClient:      handoffClient,
 	}
 }
 
@@ -58,13 +68,13 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	defer store.Close()
 
-	telemetrySpool, err := spool.Open(filepath.Join(a.config.StateDir, "spool"), spool.DefaultMaxBytes, spool.DefaultMaxRecords)
+	telemetrySpool, err := spool.Open(filepath.Join(filepath.Dir(a.config.StateDir), "spool"), spool.DefaultMaxBytes, spool.DefaultMaxRecords)
 	if err != nil {
 		return fmt.Errorf("initialize telemetry spool: %w", err)
 	}
 	a.telemetrySpool = telemetrySpool
 
-	applicationSpool, err := appspool.Open(filepath.Join(a.config.StateDir, "spool", "applications"), appspool.DefaultMaxBytes, appspool.DefaultMaxRecords)
+	applicationSpool, err := appspool.Open(filepath.Join(filepath.Dir(a.config.StateDir), "spool", "applications"), appspool.DefaultMaxBytes, appspool.DefaultMaxRecords)
 	if err != nil {
 		return fmt.Errorf("initialize per-application telemetry spool: %w", err)
 	}
@@ -93,7 +103,7 @@ func (a *App) Run(ctx context.Context) error {
 
 	telemetrySender, err := telemetry.NewSender(
 		a.config.CentralURL,
-		filepath.Join(a.config.StateDir, "telemetry-delivery"),
+		filepath.Join(filepath.Dir(a.config.StateDir), "spool", "telemetry-delivery"),
 		a.config.HTTPTimeout,
 	)
 	if err != nil {
@@ -246,6 +256,9 @@ func (a *App) runControlPoll(ctx context.Context, store *state.Store, agentState
 				a.logger.Error("Unable to reload local state for Runtime Activation Gate; monitoring remains disabled", "error", stateErr)
 			} else {
 				serverMetricsAllowed, gateDecisions := a.evaluateRuntimeGates(latestState, pollData, time.Now().UTC())
+				if err := a.publishBridgeHandoff(store, &latestState, pollData, gateDecisions); err != nil {
+					a.logger.Warn("Bridge local handoff remains pending; Bridge authorization will fail closed", "error", err)
+				}
 				a.collectApplicationMetrics(ctx, latestState, gateDecisions)
 				if serverMetricsAllowed {
 					a.collectServerMetrics(latestState)

@@ -74,10 +74,9 @@ func BuildRequest(agentState state.State, token string, manifest Manifest) ([]by
 	}
 
 	osName, osVersion := readOSRelease()
-	ipAddress, err := readServerIPv4Address()
-	if err != nil {
-		return nil, "", fmt.Errorf("read server IPv4 address: %w", err)
-	}
+	ipAddress, _ := readServerIPv4Address()
+	// Central defines server.ip_address as nullable, so missing IPv4 data
+	// must not block an otherwise valid Agent enrollment.
 
 	request := EnrollmentRequest{
 		EnrollmentToken: token,

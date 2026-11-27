@@ -6,9 +6,19 @@ BINARY_SOURCE="${PACKAGE_ROOT}/bin/linux-amd64/nadi-agent"
 UNIT_SOURCE="${PACKAGE_ROOT}/systemd/nadi-agent.service"
 BINARY_TARGET="/opt/nadi/bin/nadi-agent"
 UNIT_TARGET="/etc/systemd/system/nadi-agent.service"
-ENV_TARGET="/etc/nadi-agent/agent.env"
-STATE_DIR="/var/lib/nadi-agent"
-KEY_FILE="/etc/nadi-agent/keys/activation-public.pem"
+ENV_TARGET="/etc/nadi/agent.env"
+STATE_DIR="/var/lib/nadi/state"
+KEY_FILE="/etc/nadi/keys/activation-public.pem"
+LEGACY_STATE_DIR="/var/lib/nadi-agent"
+LEGACY_CONFIG_DIR="/etc/nadi-agent"
+LEGACY_STATE_PATHS=(
+    "/var/lib/nadi/state.json"
+    "/var/lib/nadi/state-integrity-private.pem"
+    "/var/lib/nadi/agent.lock"
+    "/var/lib/nadi/log-dedupe"
+    "/var/lib/nadi/nginx-error-log-cursor.json"
+    "/var/lib/nadi/telemetry-delivery"
+)
 
 if [[ "$(id -u)" -ne 0 ]]; then
     echo "ERROR: jalankan script ini dengan sudo/root." >&2
@@ -20,6 +30,22 @@ if [[ "$(uname -m)" != "x86_64" ]]; then
     exit 1
 fi
 
+if [[ -e "${LEGACY_STATE_DIR}" || -e "${LEGACY_CONFIG_DIR}" ]]; then
+    echo "ERROR: ditemukan direktori instalasi legacy NADI." >&2
+    echo "State/credential tidak dipindahkan otomatis karena prosedur migrasi belum ditetapkan." >&2
+    echo "Pertahankan seluruh data dan selesaikan recovery/migrasi identitas sebelum menjalankan installer ini." >&2
+    exit 1
+fi
+
+for legacy_path in "${LEGACY_STATE_PATHS[@]}"; do
+    if [[ -e "${legacy_path}" ]]; then
+        echo "ERROR: ditemukan data Agent pada layout state lama: ${legacy_path}" >&2
+        echo "Installer tidak membuat state baru atau memindahkan data lama secara otomatis." >&2
+        echo "Selesaikan recovery/migrasi identitas sebelum melanjutkan." >&2
+        exit 1
+    fi
+done
+
 if [[ ! -x "${BINARY_SOURCE}" ]]; then
     echo "ERROR: binary AMD64 tidak ditemukan: ${BINARY_SOURCE}" >&2
     exit 1
@@ -30,13 +56,13 @@ if [[ ! -f "${UNIT_SOURCE}" ]]; then
     exit 1
 fi
 
-if [[ ! -s "${KEY_FILE}" ]]; then
-    echo "ERROR: Activation public key tidak ditemukan: ${KEY_FILE}" >&2
+if [[ -L "${KEY_FILE}" || ! -s "${KEY_FILE}" ]]; then
+    echo "ERROR: Activation public key tidak ditemukan atau berupa symlink: ${KEY_FILE}" >&2
     echo "Installer tidak membuat atau mengganti trust anchor Central." >&2
     exit 1
 fi
 
-if [[ ! -s "${STATE_DIR}/state.json" ]]; then
+if [[ -L "${STATE_DIR}/state.json" || ! -s "${STATE_DIR}/state.json" ]]; then
     echo "ERROR: state.json enrollment tidak ditemukan di ${STATE_DIR}." >&2
     echo "Installer dihentikan agar tidak memasang service dengan identitas Agent kosong." >&2
     exit 1
@@ -51,19 +77,54 @@ if [[ "${state_owner}" != "nadi-agent:nadi-agent" || "${state_mode}" != "600" ]]
 fi
 
 if ! id nadi-agent >/dev/null 2>&1; then
-    useradd --system --home-dir /var/lib/nadi-agent --shell /usr/sbin/nologin nadi-agent
+    useradd --system --home-dir /var/lib/nadi/state --shell /usr/sbin/nologin nadi-agent
+else
+    account_home="$(getent passwd nadi-agent | cut -d: -f6)"
+    if [[ "${account_home}" != "${STATE_DIR}" ]]; then
+        echo "ERROR: home directory user nadi-agent tidak sesuai ADR-0001 (${account_home})." >&2
+        echo "Installer tidak mengubah metadata akun sistem secara otomatis." >&2
+        exit 1
+    fi
 fi
 
+if [[ -L "${STATE_DIR}" || ! -d "${STATE_DIR}" ]]; then
+    echo "ERROR: state directory hilang, bukan direktori, atau berupa symlink." >&2
+    exit 1
+fi
+
+state_dir_owner="$(stat -c '%U:%G' "${STATE_DIR}")"
+state_dir_mode="$(stat -c '%a' "${STATE_DIR}")"
+if [[ "${state_dir_owner}" != "nadi-agent:nadi-agent" || "${state_dir_mode}" != "700" ]]; then
+    echo "ERROR: state directory harus 700 nadi-agent:nadi-agent (saat ini ${state_dir_mode} ${state_dir_owner})." >&2
+    exit 1
+fi
+
+for data_dir in /var/lib/nadi /var/lib/nadi/spool /var/lib/nadi/engines; do
+    if [[ -e "${data_dir}" ]]; then
+        if [[ ! -d "${data_dir}" || -L "${data_dir}" ]]; then
+            echo "ERROR: direktori data tidak aman: ${data_dir}" >&2
+            exit 1
+        fi
+        data_dir_owner="$(stat -c '%U:%G' "${data_dir}")"
+        data_dir_mode="$(stat -c '%a' "${data_dir}")"
+        if [[ "${data_dir_owner}" != "nadi-agent:nadi-agent" || "${data_dir_mode}" != "700" ]]; then
+            echo "ERROR: permission direktori tidak sesuai: ${data_dir} (${data_dir_mode} ${data_dir_owner})." >&2
+            exit 1
+        fi
+    else
+        install -d -o nadi-agent -g nadi-agent -m 0700 "${data_dir}"
+    fi
+done
+
 install -d -o root -g root -m 0755 /opt/nadi /opt/nadi/bin
-install -d -o root -g root -m 0755 /etc/nadi-agent
-install -d -o root -g root -m 0755 /etc/nadi-agent/keys
-install -d -o nadi-agent -g nadi-agent -m 0700 "${STATE_DIR}"
+install -d -o root -g nadi-agent -m 0750 /etc/nadi
+install -d -o root -g nadi-agent -m 0750 /etc/nadi/keys
 
 if [[ ! -e "${ENV_TARGET}" ]]; then
     cat > "${ENV_TARGET}" <<'ENVEOF'
 NADI_CENTRAL_URL=https://nadi.pesantrenalirsyad.org
-NADI_STATE_DIR=/var/lib/nadi-agent
-NADI_ACTIVATION_PUBLIC_KEY=/etc/nadi-agent/keys/activation-public.pem
+NADI_STATE_DIR=/var/lib/nadi/state
+NADI_ACTIVATION_PUBLIC_KEY=/etc/nadi/keys/activation-public.pem
 NADI_ACTIVATION_KEY_ID=nadi-central-2026-01
 NADI_LOG_LEVEL=info
 NADI_POLL_INTERVAL_SECONDS=30
@@ -71,6 +132,19 @@ NADI_HTTP_TIMEOUT_SECONDS=10
 ENVEOF
     chown root:nadi-agent "${ENV_TARGET}"
     chmod 0640 "${ENV_TARGET}"
+else
+    env_owner="$(stat -c '%U:%G' "${ENV_TARGET}")"
+    env_mode="$(stat -c '%a' "${ENV_TARGET}")"
+    if [[ "${env_owner}" != "root:nadi-agent" || "${env_mode}" != "640" ]]; then
+        echo "ERROR: agent.env harus 640 root:nadi-agent; existing config tidak diubah otomatis." >&2
+        exit 1
+    fi
+    if ! grep -Fxq "NADI_STATE_DIR=/var/lib/nadi/state" "${ENV_TARGET}" ||
+        ! grep -Fxq "NADI_ACTIVATION_PUBLIC_KEY=/etc/nadi/keys/activation-public.pem" "${ENV_TARGET}"; then
+        echo "ERROR: konfigurasi environment existing tidak sesuai layout ADR-0001." >&2
+        echo "Installer tidak menimpa konfigurasi existing secara otomatis." >&2
+        exit 1
+    fi
 fi
 
 if [[ -e "${BINARY_TARGET}" ]]; then
@@ -86,8 +160,6 @@ mv -f "${BINARY_TARGET}.new" "${BINARY_TARGET}"
 install -o root -g root -m 0644 "${UNIT_SOURCE}" "${UNIT_TARGET}"
 chown root:root "${KEY_FILE}"
 chmod 0644 "${KEY_FILE}"
-chown nadi-agent:nadi-agent "${STATE_DIR}"
-chmod 0700 "${STATE_DIR}"
 
 systemctl daemon-reload
 

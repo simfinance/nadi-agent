@@ -4,7 +4,7 @@ Standalone Go agent for NADI Central.
 
 ## Current milestone: Central Telemetry Delivery v0.7.5-dev
 
-The current development build adds a Central JSON telemetry batch sender, persistent per-scope/per-stream sequences, durable pending-batch retry, and strict acknowledgement validation. It currently sends only the server/application metrics records already produced by the existing collectors. It does not yet implement all eleven stream collectors or the full HTTP status/quarantine policy. See `RELEASE-NOTES.md` and `INSTALL-SIMPIAV2.md` before deployment.
+The current development build adds a Central JSON telemetry batch sender, persistent per-scope/per-stream sequences, durable pending-batch retry, and strict acknowledgement validation. It currently sends only the server/application metrics records already produced by the existing collectors. It does not yet implement all eleven stream collectors or the full HTTP status/quarantine policy. See `RELEASE-NOTES.md` and `docs/SUPPORTED-PLATFORMS.md` before deployment.
 
 ## Previous milestone: Agent Credential Rotation v0.7.0-dev
 
@@ -23,6 +23,25 @@ The current development build adds a Central JSON telemetry batch sender, persis
 - no telemetry upload or command execution; Central ingestion contract is not assumed
 - credential delivery retrieve, atomic staging, new-credential ACK, and restart-safe retry
 
+## Supported installation targets
+
+The provisioning helper supports Ubuntu Linux on AMD64 and ARM64 with systemd. One Agent is installed per server and can manage multiple Laravel applications with per-application isolation. The supported platform and Laravel compatibility boundaries are documented in `docs/SUPPORTED-PLATFORMS.md`. The current simpiav2 script is a pilot-specific path, not the generic installation contract.
+
+## Trusted installer bootstrap
+
+The Laravel package and Artisan command must run as the non-root application deployment user. Never run Composer or `php artisan nadi:install` through sudo or from a root shell.
+
+Before the first Artisan installation, the server administrator must provision the signed, architecture-specific `nadi-provision-helper` Debian package through the trusted Ubuntu OS package channel, verify its detached Ed25519 signature against the pinned NADI release trust anchor, and install the exact helper at `/usr/libexec/nadi/nadi-provision`. The administrator must also authorize only the exact helper invocation for the deployment user through a root-owned mode-0440 sudoers rule validated with `visudo -cf`. See `docs/TRUSTED-HELPER-BOOTSTRAP.md` for the package contract and verification steps.
+
+After that host prerequisite is provisioned, the application deployment user runs:
+
+```bash
+composer require nadi/laravel-agent
+php artisan nadi:install
+```
+
+The Composer package never installs, replaces, or bootstraps the root-owned helper. The Debian package contains only the fixed helper executable and no maintainer scripts. Package source and CI checks are present, but the production package has not yet been signed and published with the protected release key; the installer is not production-ready.
+
 ## Requirements
 
 - Go 1.23 or newer to build from source
@@ -38,8 +57,8 @@ The current development build adds a Central JSON telemetry batch sender, persis
 | `NADI_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
 | `NADI_POLL_INTERVAL_SECONDS` | `30` | Fallback Control Poll interval |
 | `NADI_HTTP_TIMEOUT_SECONDS` | `10` | HTTP request timeout |
-| `NADI_STATE_DIR` | `/var/lib/nadi-agent` | Protected local state directory |
-| `NADI_ACTIVATION_PUBLIC_KEY` | `/etc/nadi-agent/keys/activation-public.pem` | Central Ed25519 public key in PKIX PEM format |
+| `NADI_STATE_DIR` | `/var/lib/nadi/state` | Protected local state directory |
+| `NADI_ACTIVATION_PUBLIC_KEY` | `/etc/nadi/keys/activation-public.pem` | Central Ed25519 public key in PKIX PEM format |
 | `NADI_ACTIVATION_KEY_ID` | `nadi-central-2026-01` | Expected Activation Grant key ID |
 
 ## Enrollment manifest
@@ -102,7 +121,7 @@ go build -o nadi-agent ./cmd/nadi-agent
 
 The Agent verifies Central Activation Grants locally using Ed25519. Configure the
 Central public key on the Agent host and set `NADI_ACTIVATION_PUBLIC_KEY` to its
-path (default: `/etc/nadi-agent/keys/activation-public.pem`). The expected key ID
+path (default: `/etc/nadi/keys/activation-public.pem`). The expected key ID
 can be set with `NADI_ACTIVATION_KEY_ID` (default: `nadi-central-2026-01`).
 
 The public key must be an Ed25519 SubjectPublicKeyInfo PEM file. The Agent stores

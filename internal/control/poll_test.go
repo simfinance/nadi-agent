@@ -26,7 +26,7 @@ func TestPollSendsAuthenticatedPOSTAndDecodesResponse(t *testing.T) {
 		}
 
 		writer.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(writer, `{"success":true,"data":{"agent":{"id":"agent-123","agent_instance_id":"instance-123","status":"active","installation_state":"installed","agent_version":"0.3.0-dev","protocol_version":"1"},"control":{"poll_interval_seconds":30},"applications":[{"application_id":"app-123","name":"Example","registration_status":"approved","activation_status":"pending","monitoring_status":"dormant","endpoint":{"base_url":"https://app.example.test"},"monitoring_enabled":false,"activation_grant":null}],"commands":[],"server_time":"2026-11-20T03:30:00Z"}}`)
+		fmt.Fprint(writer, `{"success":true,"data":{"agent":{"id":"agent-123","agent_instance_id":"instance-123","status":"active","installation_state":"installed","agent_version":"0.3.0-dev","protocol_version":"1"},"control":{"poll_interval_seconds":30},"applications":[{"application_id":"app-123","name":"Example","registration_status":"approved","activation_status":"pending","monitoring_status":"dormant","endpoint":"https://app.example.test","monitoring_enabled":false,"activation_grant":null}],"commands":[],"server_time":"2026-11-20T03:30:00Z"}}`)
 	}))
 	defer server.Close()
 
@@ -41,6 +41,9 @@ func TestPollSendsAuthenticatedPOSTAndDecodesResponse(t *testing.T) {
 	}
 	if len(data.Applications) != 1 || data.Applications[0].ApplicationID != "app-123" {
 		t.Fatalf("unexpected applications: %#v", data.Applications)
+	}
+	if data.Applications[0].Endpoint.BaseURL != "https://app.example.test" {
+		t.Fatalf("Central string endpoint was not decoded: %q", data.Applications[0].Endpoint.BaseURL)
 	}
 }
 

@@ -105,3 +105,31 @@ func TestSystemLogTelemetryAcceptsExplicitPath(t *testing.T) {
 		t.Fatalf("unexpected system log configuration: %#v", cfg)
 	}
 }
+
+func TestValidateRejectsRelativeHandoffSocketPath(t *testing.T) {
+	cfg := Config{
+		CentralURL:        "https://central.example.test",
+		LogLevel:          "info",
+		PollInterval:      30 * time.Second,
+		HTTPTimeout:       10 * time.Second,
+		StateDir:          "/tmp/nadi-agent-test",
+		HandoffSocketPath: "relative/handoff.sock",
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected relative handoff socket path to be rejected")
+	}
+}
+
+func TestLoadUsesCanonicalStateDirectory(t *testing.T) {
+	t.Setenv("NADI_CENTRAL_URL", "https://central.example.test")
+	t.Setenv("NADI_STATE_DIR", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load default config: %v", err)
+	}
+	if cfg.StateDir != "/var/lib/nadi/state" {
+		t.Fatalf("expected canonical state directory, got %q", cfg.StateDir)
+	}
+}

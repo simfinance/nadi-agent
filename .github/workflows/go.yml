@@ -15,48 +15,16 @@ concurrency:
     cancel-in-progress: true
 
 jobs:
-    format:
-        if: github.event.pull_request.head.repo.full_name == github.repository
-        runs-on: ubuntu-latest
-        permissions:
-            contents: write
-        steps:
-            - name: Checkout Agent branch
-              uses: actions/checkout@v4
-              with:
-                  repository: ${{ github.event.pull_request.head.repo.full_name }}
-                  ref: ${{ github.event.pull_request.head.ref }}
-
-            - name: Set up Go
-              uses: actions/setup-go@v5
-              with:
-                  go-version: "1.23.x"
-
-            - name: Format Go source
-              run: gofmt -w .
-
-            - name: Commit formatting changes
-              run: |
-                  if [ -n "$(git status --porcelain -- '*.go')" ]; then
-                      git config user.name "github-actions[bot]"
-                      git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-                      git add '*.go'
-                      git commit -m "Apply gofmt to Agent changes"
-                      git push origin HEAD:"${{ github.event.pull_request.head.ref }}"
-                  fi
-
     validate:
-        needs: format
-        if: always() && (needs.format.result == 'success' || needs.format.result == 'skipped')
         runs-on: ubuntu-latest
         permissions:
             contents: read
         steps:
-            - name: Checkout Agent branch
+            - name: Checkout Agent pull request head
               uses: actions/checkout@v4
               with:
                   repository: ${{ github.event.pull_request.head.repo.full_name }}
-                  ref: ${{ github.event.pull_request.head.ref }}
+                  ref: ${{ github.event.pull_request.head.sha }}
 
             - name: Set up Go
               uses: actions/setup-go@v5
@@ -91,3 +59,182 @@ jobs:
                   GOOS: linux
                   GOARCH: arm64
               run: go build ./...
+
+            - name: Build and install Debian helper bootstrap packages
+              shell: bash
+              run: |
+                  set -euo pipefail
+
+                  temporary_directory="$(mktemp -d)"
+                  trap 'sudo rm -f /etc/sudoers.d/nadi-provision-ci; sudo userdel nadi-bootstrap-ci >/dev/null 2>&1 || true; sudo dpkg -r nadi-provision-helper >/dev/null 2>&1 || true; rm -rf "$temporary_directory"' EXIT
+
+                  openssl genpkey -algorithm ED25519 -out "$temporary_directory/test-signing-private.pem"
+                  openssl pkey -in "$temporary_directory/test-signing-private.pem" -pubout -out "$temporary_directory/test-signing-public.pem"
+
+                  agent_version="$(sed -nE 's/^[[:space:]]*Agent[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' internal/version/version.go)"
+                  if [ -z "$agent_version" ]; then
+                      printf 'Unable to read Agent version from source.\n' >&2
+                      exit 1
+                  fi
+
+                  printf '%s\n' '{"schema_version":1,"product":"nadi-agent","key_id":"nadi-agent-release-2026-01","version":"0.0.0","protocol_version":1,"released_at":"2026-11-27T00:00:00Z","artifacts":[]}' > "$temporary_directory/invalid-manifest.json"
+                  openssl pkeyutl \
+                      -sign \
+                      -rawin \
+                      -inkey "$temporary_directory/test-signing-private.pem" \
+                      -in "$temporary_directory/invalid-manifest.json" \
+                      -out "$temporary_directory/invalid-manifest.sig"
+                  base64 -w0 "$temporary_directory/invalid-manifest.sig" > "$temporary_directory/invalid-manifest.sig.b64"
+
+                  for architecture in amd64 arm64; do
+                      binary_path="$temporary_directory/nadi-agent-$architecture"
+                      package_path="$temporary_directory/nadi-provision-helper_${agent_version}_${architecture}.deb"
+
+                      GOOS=linux GOARCH="$architecture" CGO_ENABLED=0 go build -o "$binary_path" ./cmd/nadi-agent
+                      digest="$(sha256sum "$binary_path" | awk '{print $1}')"
+
+                      scripts/build-helper-deb.sh \
+                          "$binary_path" \
+                          "${agent_version}" \
+                          "$architecture" \
+                          "$digest" \
+                          "$package_path"
+
+                      scripts/test-helper-deb.sh "$package_path" "${agent_version}" "$architecture"
+
+                      openssl pkeyutl \
+                          -sign \
+                          -rawin \
+                          -inkey "$temporary_directory/test-signing-private.pem" \
+                          -in "$package_path" \
+                          -out "$package_path.sig"
+
+                      openssl pkeyutl \
+                          -verify \
+                          -pubin \
+                          -inkey "$temporary_directory/test-signing-public.pem" \
+                          -rawin \
+                          -in "$package_path" \
+                          -sigfile "$package_path.sig"
+
+                      if scripts/verify-helper-package-signature.sh \
+                          "$temporary_directory/test-signing-public.pem" \
+                          "$package_path" \
+                          "$package_path.sig" 2>"$temporary_directory/verify-error.txt"; then
+                          printf 'Verifier accepted a public key outside the pinned NADI trust anchor.\n' >&2
+                          exit 1
+                      fi
+                      grep -F 'Release public key fingerprint does not match' "$temporary_directory/verify-error.txt"
+
+                      trusted_public_key="$GITHUB_WORKSPACE/release/public-keys/release-signing-public.pem"
+                      ln -s "$temporary_directory/test-signing-public.pem" "$temporary_directory/symlink-public-$architecture.pem"
+                      ln -s "$package_path" "$temporary_directory/symlink-package-$architecture.deb"
+                      ln -s "$package_path.sig" "$temporary_directory/symlink-signature-$architecture.sig"
+
+                      for input_case in public-key package signature; do
+                          case "$input_case" in
+                              public-key)
+                                  verifier_public_key="$temporary_directory/symlink-public-$architecture.pem"
+                                  verifier_package="$package_path"
+                                  verifier_signature="$package_path.sig"
+                                  ;;
+                              package)
+                                  verifier_public_key="$trusted_public_key"
+                                  verifier_package="$temporary_directory/symlink-package-$architecture.deb"
+                                  verifier_signature="$package_path.sig"
+                                  ;;
+                              signature)
+                                  verifier_public_key="$trusted_public_key"
+                                  verifier_package="$package_path"
+                                  verifier_signature="$temporary_directory/symlink-signature-$architecture.sig"
+                                  ;;
+                          esac
+
+                          if scripts/verify-helper-package-signature.sh \
+                              "$verifier_public_key" \
+                              "$verifier_package" \
+                              "$verifier_signature" 2>"$temporary_directory/verify-symlink-error.txt"; then
+                              printf 'Verifier accepted a symlinked %s input.\n' "$input_case" >&2
+                              exit 1
+                          fi
+                          if ! grep -Fq 'regular non-symlink files' "$temporary_directory/verify-symlink-error.txt"; then
+                              printf 'Verifier did not reject the symlinked %s input as expected. Diagnostic follows:\n' "$input_case" >&2
+                              cat "$temporary_directory/verify-symlink-error.txt" >&2
+                              exit 1
+                          fi
+                      done
+
+                      if bash scripts/sign-helper-package.sh \
+                          "$temporary_directory/test-signing-private.pem" \
+                          "$package_path" \
+                          "$temporary_directory/invalid-manifest.json" \
+                          "$temporary_directory/invalid-manifest.sig.b64" \
+                          "$binary_path" \
+                          "$architecture" \
+                          "$package_path.production-test.sig" 2>"$temporary_directory/sign-error.txt"; then
+                          printf 'Signer accepted a private key outside the pinned NADI trust anchor.\n' >&2
+                          exit 1
+                      fi
+                      if ! grep -Fq 'trust anchor' "$temporary_directory/sign-error.txt"; then
+                          printf 'Signer rejection did not identify the pinned trust anchor. Diagnostic follows:\n' >&2
+                          cat "$temporary_directory/sign-error.txt" >&2
+                          exit 1
+                      fi
+
+                      if (
+                          cd "$temporary_directory"
+                          bash "$GITHUB_WORKSPACE/scripts/sign-helper-package.sh" \
+                              "test-signing-private.pem" \
+                              "nadi-provision-helper_${agent_version}_${architecture}.deb" \
+                              "invalid-manifest.json" \
+                              "invalid-manifest.sig.b64" \
+                              "nadi-agent-${architecture}" \
+                              "$architecture" \
+                              "relative-output.sig"
+                      ) 2>"$temporary_directory/sign-relative-error.txt"; then
+                          printf 'Signer unexpectedly accepted an untrusted key with relative input paths.\n' >&2
+                          exit 1
+                      fi
+                      if ! grep -Fq 'trust anchor' "$temporary_directory/sign-relative-error.txt"; then
+                          printf 'Relative-path signer rejection did not reach the pinned trust-anchor check. Diagnostic follows:\n' >&2
+                          cat "$temporary_directory/sign-relative-error.txt" >&2
+                          exit 1
+                      fi
+                  done
+
+                  if go run ./cmd/nadi-release-verifier \
+                      "$temporary_directory/invalid-manifest.json" \
+                      "$temporary_directory/invalid-manifest.sig.b64" \
+                      "$temporary_directory/nadi-agent-amd64" \
+                      amd64 2>"$temporary_directory/manifest-error.txt"; then
+                      printf 'Release verifier accepted a manifest signed by an untrusted key.\n' >&2
+                      exit 1
+                  fi
+                  grep -F 'release manifest signature verification failed' "$temporary_directory/manifest-error.txt"
+
+                  sudo dpkg -i "$temporary_directory/nadi-provision-helper_${agent_version}_amd64.deb"
+
+                  installed_metadata="$(stat -c '%u:%g:%a' /usr/libexec/nadi/nadi-provision)"
+                  if [ "$installed_metadata" != "0:0:755" ]; then
+                      printf 'Installed helper metadata is invalid: %s\n' "$installed_metadata" >&2
+                      exit 1
+                  fi
+
+                  sudo useradd --system --no-create-home --shell /usr/sbin/nologin nadi-bootstrap-ci
+                  sudoers_file="/etc/sudoers.d/nadi-provision-ci"
+                  printf '%s\n' 'nadi-bootstrap-ci ALL=(root) NOPASSWD: /usr/libexec/nadi/nadi-provision --request-stdin' | sudo tee "$sudoers_file" >/dev/null
+                  sudo chown root:root "$sudoers_file"
+                  sudo chmod 0440 "$sudoers_file"
+                  sudo visudo -cf "$sudoers_file"
+
+                  if printf '%s' '{"protocol_version":999,"operation":"start_agent"}' | sudo -u nadi-bootstrap-ci /usr/bin/sudo -n -- /usr/libexec/nadi/nadi-provision --request-stdin > "$temporary_directory/helper-response.json" 2> "$temporary_directory/helper-error.txt"; then
+                      printf 'The helper unexpectedly accepted an invalid protocol version.\n' >&2
+                      exit 1
+                  fi
+
+                  grep -F '"phase":"request_validation"' "$temporary_directory/helper-response.json"
+                  grep -F '"success":false' "$temporary_directory/helper-response.json"
+
+                  sudo rm -f "$sudoers_file"
+                  sudo userdel nadi-bootstrap-ci
+                  sudo dpkg -r nadi-provision-helper

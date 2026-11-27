@@ -1,0 +1,178 @@
+package provision
+
+import (
+	"bytes"
+	"encoding/base64"
+	"strings"
+	"testing"
+)
+
+func TestValidateInstallOperationRejectsDuplicateRuntimeUID(t *testing.T) {
+	request := validInstallOperationRequest()
+	request.Applications[1].RuntimeUID = request.Applications[0].RuntimeUID
+
+	if err := validateProvisionOperationRequest(request); err == nil {
+		t.Fatal("duplicate runtime UID must be rejected")
+	}
+}
+
+func TestValidateInstallOperationRejectsOverlappingApplicationPaths(t *testing.T) {
+	request := validInstallOperationRequest()
+	request.Applications[1].BasePath = "/srv/www/application-one/nested"
+
+	if err := validateProvisionOperationRequest(request); err == nil {
+		t.Fatal("overlapping application paths must be rejected")
+	}
+}
+
+func TestDecodeProvisionOperationRejectsOversizedInput(t *testing.T) {
+	content := bytes.NewReader(bytes.Repeat([]byte("x"), maximumProvisionRequestBytes+1))
+
+	if _, err := DecodeProvisionOperationRequest(content); err == nil {
+		t.Fatal("oversized provisioning request must be rejected")
+	}
+}
+
+func TestMatchEnrollmentManifestRejectsMissingApplicationMapping(t *testing.T) {
+	inventory := provisionInventory{
+		ProtocolVersion: 1,
+		AgentVersion:    "0.7.5",
+		Applications: []ProvisionApplication{
+			{ApplicationKey: "application-one", BasePath: "/srv/www/one", RuntimeUID: 1001, RuntimeGID: 1001},
+			{ApplicationKey: "application-two", BasePath: "/srv/www/two", RuntimeUID: 1002, RuntimeGID: 1002},
+		},
+	}
+	manifest := provisionEnrollmentManifest{
+		Applications: []provisionManifestApplication{
+			{ApplicationKey: "application-one", ApplicationName: "One", Environment: "production", BaseURL: "https://one.example.test"},
+		},
+	}
+
+	if err := matchEnrollmentManifestToInventory(manifest, inventory); err == nil {
+		t.Fatal("manifest missing an installed application must be rejected")
+	}
+}
+
+func TestMatchEnrollmentManifestRejectsNonHTTPSURL(t *testing.T) {
+	inventory := provisionInventory{
+		ProtocolVersion: 1,
+		AgentVersion:    "0.7.5",
+		Applications: []ProvisionApplication{
+			{ApplicationKey: "application-one", BasePath: "/srv/www/one", RuntimeUID: 1001, RuntimeGID: 1001},
+		},
+	}
+	manifest := provisionEnrollmentManifest{
+		Applications: []provisionManifestApplication{
+			{ApplicationKey: "application-one", ApplicationName: "One", Environment: "production", BaseURL: "http://one.example.test"},
+		},
+	}
+
+	if err := matchEnrollmentManifestToInventory(manifest, inventory); err == nil {
+		t.Fatal("non-HTTPS application URL must be rejected")
+	}
+}
+
+func TestValidateEnrollmentOperationRequiresOneTimeToken(t *testing.T) {
+	request := ProvisionOperationRequest{
+		ProtocolVersion: 1,
+		Operation:       "enroll_agent",
+		Enrollment: &ProvisionEnrollment{
+			ManifestBase64: base64.StdEncoding.EncodeToString([]byte(`{"applications":[]}`)),
+			Token:          "invalid-token",
+		},
+	}
+
+	if err := validateProvisionOperationRequest(request); err == nil {
+		t.Fatal("invalid one-time enrollment token must be rejected")
+	}
+}
+
+func TestValidateInstallOperationRequiresUniqueApplicationKeys(t *testing.T) {
+	request := validInstallOperationRequest()
+	request.Applications[1].ApplicationKey = request.Applications[0].ApplicationKey
+
+	if err := validateProvisionOperationRequest(request); err == nil {
+		t.Fatal("duplicate application keys must be rejected")
+	}
+}
+
+func validInstallOperationRequest() ProvisionOperationRequest {
+	return ProvisionOperationRequest{
+		ProtocolVersion: 1,
+		Operation:       "install_agent",
+		Release: &ProvisionReleaseRequest{
+			ManifestBase64:  base64.StdEncoding.EncodeToString([]byte(`{"schema_version":1}`)),
+			SignatureBase64: "signature",
+			ArtifactPath:    "/srv/www/application-one/storage/app/private/nadi/releases/staging/nadi-agent",
+		},
+		CentralSourceIPs: []string{"203.0.113.10"},
+		Applications: []ProvisionApplication{
+			{
+				ApplicationKey: "application-one",
+				BasePath:       "/srv/www/application-one",
+				RuntimeUID:     1001,
+				RuntimeGID:     1001,
+			},
+			{
+				ApplicationKey: "application-two",
+				BasePath:       "/srv/www/application-two",
+				RuntimeUID:     1002,
+				RuntimeGID:     1002,
+			},
+		},
+	}
+}
+
+func TestValidateInstallOperationRejectsDuplicateRuntimeGID(t *testing.T) {
+	request := validInstallOperationRequest()
+	request.Applications[1].RuntimeGID = request.Applications[0].RuntimeGID
+
+	if err := validateProvisionOperationRequest(request); err == nil {
+		t.Fatal("duplicate runtime GID must be rejected for per-application configuration isolation")
+	}
+}
+
+func TestValidateInstallOperationRejectsInvalidCentralSourceIP(t *testing.T) {
+	request := validInstallOperationRequest()
+	request.CentralSourceIPs = []string{"https://central.example.test"}
+
+	if err := validateProvisionOperationRequest(request); err == nil {
+		t.Fatal("Central source allowlist must contain exact IP addresses")
+	}
+}
+
+func TestSameCentralSourceIPsIgnoresOrderAndCanonicalizesIPv6(t *testing.T) {
+	installed := []string{"203.0.113.10", "2001:0db8:0:0:0:0:0:1"}
+	requested := []string{"2001:db8::1", "203.0.113.10"}
+
+	if !sameCentralSourceIPs(installed, requested) {
+		t.Fatal("equivalent exact source IP addresses must compare equal")
+	}
+}
+
+func TestEnrollmentTokenPatternRejectsWhitespace(t *testing.T) {
+	token := "nadi_enroll_" + strings.Repeat("a", 64) + " "
+	if enrollmentTokenPattern.MatchString(token) {
+		t.Fatal("enrollment token with trailing whitespace must be rejected")
+	}
+}
+
+func TestSameApplicationInventoryIgnoresOrderButChecksEveryIdentityField(t *testing.T) {
+	installed := []ProvisionApplication{
+		{ApplicationKey: "application-one", BasePath: "/srv/www/one", RuntimeUID: 1001, RuntimeGID: 1001},
+		{ApplicationKey: "application-two", BasePath: "/srv/www/two", RuntimeUID: 1002, RuntimeGID: 1002},
+	}
+	requested := []ProvisionApplication{
+		installed[1],
+		installed[0],
+	}
+
+	if !sameApplicationInventory(installed, requested) {
+		t.Fatal("the same application inventory in a different order must be accepted")
+	}
+
+	requested[0].RuntimeUID = 2002
+	if sameApplicationInventory(installed, requested) {
+		t.Fatal("a changed runtime UID must invalidate the existing inventory")
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"nadi-agent/internal/nginxlogs"
@@ -34,6 +35,7 @@ type Record struct {
 }
 
 type Store struct {
+	mu         sync.RWMutex
 	directory  string
 	path       string
 	maxBytes   int64
@@ -64,6 +66,9 @@ func Open(directory string, maxBytes int64, maxRecords int) (*Store, error) {
 }
 
 func (s *Store) Append(serverID string, agentID string, snapshot servermetrics.Snapshot) (Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if strings.TrimSpace(serverID) == "" || strings.TrimSpace(agentID) == "" {
 		return Record{}, errors.New("server_id and agent_id are required for telemetry")
 	}
@@ -123,6 +128,9 @@ func (s *Store) AppendNginxErrorLogs(
 	agentID string,
 	entries []nginxlogs.Entry,
 ) ([]Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if strings.TrimSpace(serverID) == "" || strings.TrimSpace(agentID) == "" {
 		return nil, errors.New("server_id and agent_id are required for Nginx error logs")
 	}
@@ -194,6 +202,9 @@ func (s *Store) AppendNginxErrorLogs(
 }
 
 func (s *Store) ReadBatch(limit int) ([]Record, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	if limit <= 0 {
 		return nil, errors.New("batch limit must be positive")
 	}
@@ -228,6 +239,9 @@ func (s *Store) ReadBatch(limit int) ([]Record, error) {
 }
 
 func (s *Store) Acknowledge(eventIDs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if len(eventIDs) == 0 {
 		return nil
 	}
@@ -310,6 +324,9 @@ func (s *Store) Acknowledge(eventIDs []string) error {
 }
 
 func (s *Store) Clear() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("clear telemetry spool: %w", err)
 	}

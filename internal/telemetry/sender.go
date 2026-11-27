@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -133,19 +134,38 @@ type Ack struct {
 }
 
 type Sender struct {
+	mu      sync.RWMutex
 	baseURL string
 	client  *http.Client
 	dir     string
 }
 
 func NewSender(baseURL string, directory string, timeout time.Duration) (*Sender, error) {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+
+	client := &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	return NewSenderWithHTTPClient(baseURL, directory, client)
+}
+
+// NewSenderWithHTTPClient creates a sender with an injected HTTP client.
+// Redirects remain disabled so test transports cannot weaken delivery policy.
+func NewSenderWithHTTPClient(baseURL string, directory string, client *http.Client) (*Sender, error) {
 	parsed, err := url.Parse(baseURL)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
 		return nil, errors.New("telemetry Central URL must be an absolute HTTPS URL without userinfo or fragment")
 	}
-	if timeout <= 0 {
-		timeout = 10 * time.Second
+	if client == nil {
+		return nil, errors.New("telemetry HTTP client is required")
 	}
+
 	if err := os.MkdirAll(directory, 0700); err != nil {
 		return nil, fmt.Errorf("create telemetry sender state directory: %w", err)
 	}
@@ -153,15 +173,15 @@ func NewSender(baseURL string, directory string, timeout time.Duration) (*Sender
 		return nil, fmt.Errorf("secure telemetry sender state directory: %w", err)
 	}
 
+	clientCopy := *client
+	clientCopy.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+
 	return &Sender{
 		baseURL: strings.TrimRight(baseURL, "/"),
-		client: &http.Client{
-			Timeout: timeout,
-			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		},
-		dir: directory,
+		client:  &clientCopy,
+		dir:     directory,
 	}, nil
 }
 
@@ -176,6 +196,9 @@ func IsServerStream(stream string) bool {
 }
 
 func (s *Sender) Send(ctx context.Context, agentID string, instanceID string, credential string, inputs []InputRecord) ([]Source, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if strings.TrimSpace(agentID) == "" || strings.TrimSpace(instanceID) == "" || strings.TrimSpace(credential) == "" {
 		return nil, errors.New("Agent ID, Agent instance ID, and credential are required for telemetry delivery")
 	}
@@ -313,6 +336,13 @@ func (s *Sender) Send(ctx context.Context, agentID string, instanceID string, cr
 	return nil, errors.New("telemetry delivery ended without a result")
 }
 func (s *Sender) Complete() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.completePending()
+}
+
+func (s *Sender) completePending() error {
 	pending, err := s.loadPending()
 	if err != nil {
 		return err
@@ -333,6 +363,9 @@ func (s *Sender) Complete() error {
 }
 
 func (s *Sender) PendingSources() ([]Source, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	pending, err := s.loadPending()
 	if err != nil {
 		return nil, false, err
@@ -346,6 +379,9 @@ func (s *Sender) PendingSources() ([]Source, bool, error) {
 }
 
 func (s *Sender) DiscardPending() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	pending, err := s.loadPending()
 	if err != nil {
 		return err
@@ -611,7 +647,7 @@ func (s *Sender) appendQuarantine(entry QuarantineEntry) error {
 		file.Close()
 		return fmt.Errorf("secure telemetry quarantine file: %w", err)
 	}
-	if _, err := file.Write(content); err != nil {
+	if err := writeAll(file, content); err != nil {
 		file.Close()
 		return fmt.Errorf("write telemetry quarantine entry: %w", err)
 	}
@@ -644,7 +680,7 @@ func (s *Sender) acknowledgedSourcesOrAdvance(pending *pendingBatch) ([]Source, 
 		pending.Following,
 	)
 	if len(sources) == 0 && len(pending.Following) > 0 {
-		if err := s.Complete(); err != nil {
+		if err := s.completePending(); err != nil {
 			return nil, fmt.Errorf("advance acknowledged split batch: %w", err)
 		}
 		return nil, nil
@@ -670,7 +706,7 @@ func (s *Sender) quarantinedSourcesOrAdvance(pending *pendingBatch, statusCode i
 		updated.Following,
 	)
 	if len(sources) == 0 && len(updated.Following) > 0 {
-		if err := s.Complete(); err != nil {
+		if err := s.completePending(); err != nil {
 			return nil, fmt.Errorf("advance quarantined split batch: %w", err)
 		}
 		if statusCode == http.StatusGone {
@@ -908,7 +944,7 @@ func (s *Sender) writeJSON(name string, value any) error {
 		temporary.Close()
 		return err
 	}
-	if _, err := temporary.Write(content); err != nil {
+	if err := writeAll(temporary, content); err != nil {
 		temporary.Close()
 		return err
 	}
@@ -943,4 +979,19 @@ func newUUID() (string, error) {
 	value[8] = (value[8] & 0x3f) | 0x80
 	encoded := hex.EncodeToString(value[:])
 	return encoded[0:8] + "-" + encoded[8:12] + "-" + encoded[12:16] + "-" + encoded[16:20] + "-" + encoded[20:32], nil
+}
+
+func writeAll(writer io.Writer, content []byte) error {
+	for len(content) > 0 {
+		written, err := writer.Write(content)
+		if err != nil {
+			return err
+		}
+		if written <= 0 {
+			return io.ErrShortWrite
+		}
+		content = content[written:]
+	}
+
+	return nil
 }
