@@ -1,11 +1,13 @@
 package telemetry
 
 import (
+	"bytes"
 	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
