@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -215,6 +216,22 @@ func verifyBridgeApplicationConfigurations(
 	centralSourceIPs []string,
 	root string,
 ) error {
+	return verifyBridgeApplicationConfigurationsAt(
+		config,
+		centralSourceIPs,
+		root,
+		0,
+		0,
+	)
+}
+
+func verifyBridgeApplicationConfigurationsAt(
+	config handoffbroker.Config,
+	centralSourceIPs []string,
+	root string,
+	ownerUID int,
+	directoryGID int,
+) error {
 	if root == "" || !filepath.IsAbs(root) || filepath.Clean(root) != root {
 		return errors.New("Bridge configuration verification root must be absolute and canonical")
 	}
@@ -237,15 +254,15 @@ func verifyBridgeApplicationConfigurations(
 	if !ok ||
 		directoryMetadata.Mode()&os.ModeSymlink != 0 ||
 		!directoryMetadata.IsDir() ||
-		int(directoryStat.Uid) != 0 ||
-		int(directoryStat.Gid) != 0 ||
+		int(directoryStat.Uid) != ownerUID ||
+		int(directoryStat.Gid) != directoryGID ||
 		directoryMetadata.Mode().Perm() != bridgeApplicationConfigDirectoryMode {
 		return errors.New("Bridge application configuration directory has unexpected ownership or permissions")
 	}
 
 	for _, artifact := range artifacts {
 		destination := filepath.Join(root, strings.TrimPrefix(artifact.Path, string(os.PathSeparator)))
-		content, err := readRootOwnedRegularFile(destination, 16*1024)
+		content, err := readBridgeApplicationConfigurationFile(destination, ownerUID)
 		if err != nil || !bytes.Equal(content, artifact.Content) {
 			return errors.New("installed Bridge application configuration does not match the verified application identity and allowlist")
 		}
@@ -258,7 +275,7 @@ func verifyBridgeApplicationConfigurations(
 		if !ok ||
 			metadata.Mode()&os.ModeSymlink != 0 ||
 			!metadata.Mode().IsRegular() ||
-			int(stat.Uid) != 0 ||
+			int(stat.Uid) != ownerUID ||
 			int(stat.Gid) != artifact.GID ||
 			metadata.Mode().Perm() != bridgeApplicationConfigFileMode {
 			return errors.New("installed Bridge application configuration ownership or permissions are invalid")
@@ -266,6 +283,64 @@ func verifyBridgeApplicationConfigurations(
 	}
 
 	return nil
+}
+
+func readBridgeApplicationConfigurationFile(path string, ownerUID int) ([]byte, error) {
+	pathMetadata, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+
+	pathStat, ok := pathMetadata.Sys().(*syscall.Stat_t)
+	if !ok ||
+		pathMetadata.Mode()&os.ModeSymlink != 0 ||
+		!pathMetadata.Mode().IsRegular() ||
+		int(pathStat.Uid) != ownerUID ||
+		pathMetadata.Mode().Perm() != bridgeApplicationConfigFileMode ||
+		pathMetadata.Size() < 2 ||
+		pathMetadata.Size() > 16*1024 ||
+		pathStat.Nlink != 1 {
+		return nil, errors.New("Bridge application configuration file metadata is unsafe")
+	}
+
+	descriptor, err := syscall.Open(
+		path,
+		syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW,
+		0,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	file := os.NewFile(uintptr(descriptor), path)
+	defer file.Close()
+
+	openedMetadata, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	openedStat, ok := openedMetadata.Sys().(*syscall.Stat_t)
+	if !ok ||
+		openedStat.Dev != pathStat.Dev ||
+		openedStat.Ino != pathStat.Ino ||
+		int(openedStat.Uid) != ownerUID ||
+		openedStat.Nlink != 1 ||
+		!openedMetadata.Mode().IsRegular() ||
+		openedMetadata.Mode().Perm() != bridgeApplicationConfigFileMode ||
+		openedMetadata.Size() < 2 ||
+		openedMetadata.Size() > 16*1024 {
+		return nil, errors.New("Bridge application configuration changed during access")
+	}
+
+	content, err := io.ReadAll(io.LimitReader(file, 16*1024+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(content) < 2 || len(content) > 16*1024 {
+		return nil, errors.New("Bridge application configuration size is invalid")
+	}
+
+	return content, nil
 }
 
 func bridgeApplicationConfigurationTargets(
