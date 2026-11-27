@@ -25,6 +25,7 @@ func TestDecodeProvisionOperationAcceptsInstallWithoutEnrollment(t *testing.T) {
 				RuntimeGID:     1001,
 			},
 		},
+		CentralSourceIPs: []string{"203.0.113.10"},
 	}
 
 	content, err := json.Marshal(request)
@@ -56,6 +57,7 @@ func TestDecodeProvisionOperationRejectsEnrollmentFieldsDuringInstall(t *testing
             "runtime_uid": 1001,
             "runtime_gid": 1001
         }],
+        "central_source_ips": ["203.0.113.10"],
         "enrollment": {
             "manifest_base64": "e30=",
             "token": "not-allowed"
