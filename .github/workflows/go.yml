@@ -143,18 +143,20 @@ jobs:
                       if scripts/verify-helper-package-signature.sh \
                           "$temporary_directory/test-signing-public.pem" \
                           "$package_path" \
-                          "$package_path.sig"; then
-                          printf 'Verifier accepted a public key outside the pinned NADI trust anchor.\\n' >&2
+                          "$package_path.sig" 2>"$temporary_directory/verify-error.txt"; then
+                          printf 'Verifier accepted a public key outside the pinned NADI trust anchor.\n' >&2
                           exit 1
                       fi
+                      grep -F 'Release public key fingerprint does not match' "$temporary_directory/verify-error.txt"
 
                       if scripts/sign-helper-package.sh \
                           "$temporary_directory/test-signing-private.pem" \
                           "$package_path" \
-                          "$package_path.production-test.sig"; then
-                          printf 'Signer accepted a private key outside the pinned NADI trust anchor.\\n' >&2
+                          "$package_path.production-test.sig" 2>"$temporary_directory/sign-error.txt"; then
+                          printf 'Signer accepted a private key outside the pinned NADI trust anchor.\n' >&2
                           exit 1
                       fi
+                      grep -F 'Release private key does not match the pinned NADI trust anchor' "$temporary_directory/sign-error.txt"
                   done
 
                   sudo dpkg -i "$temporary_directory/nadi-provision-helper_${agent_version}_amd64.deb"
