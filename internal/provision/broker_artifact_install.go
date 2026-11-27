@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -456,12 +457,64 @@ func ensureOwnedDirectory(
 	return nil
 }
 
+type provisionAtomicFile interface {
+	Name() string
+	Chmod(os.FileMode) error
+	Chown(int, int) error
+	Write([]byte) (int, error)
+	Sync() error
+	Close() error
+}
+
+type provisionAtomicDirectory interface {
+	Sync() error
+	Close() error
+}
+
+type provisionAtomicFileOperations struct {
+	createTemp    func(string, string) (provisionAtomicFile, error)
+	remove        func(string) error
+	rename        func(string, string) error
+	openDirectory func(string) (provisionAtomicDirectory, error)
+}
+
+func defaultProvisionAtomicFileOperations() provisionAtomicFileOperations {
+	return provisionAtomicFileOperations{
+		createTemp: func(directory string, pattern string) (provisionAtomicFile, error) {
+			return os.CreateTemp(directory, pattern)
+		},
+		remove: os.Remove,
+		rename: os.Rename,
+		openDirectory: func(path string) (provisionAtomicDirectory, error) {
+			return os.Open(path)
+		},
+	}
+}
+
 func writeOwnedAtomicFile(
 	path string,
 	content []byte,
 	mode os.FileMode,
 	ownerUID int,
 	ownerGID int,
+) error {
+	return writeOwnedAtomicFileWithOperations(
+		path,
+		content,
+		mode,
+		ownerUID,
+		ownerGID,
+		defaultProvisionAtomicFileOperations(),
+	)
+}
+
+func writeOwnedAtomicFileWithOperations(
+	path string,
+	content []byte,
+	mode os.FileMode,
+	ownerUID int,
+	ownerGID int,
+	operations provisionAtomicFileOperations,
 ) error {
 	parent := filepath.Dir(path)
 	if err := ensureOwnedDirectory(parent, 0, ownerUID, ownerGID); err != nil {
@@ -491,31 +544,35 @@ func writeOwnedAtomicFile(
 		return err
 	}
 
-	temporary, err := os.CreateTemp(parent, ".nadi-provision-*.tmp")
+	temporary, err := operations.createTemp(parent, ".nadi-provision-*.tmp")
 	if err != nil {
 		return err
 	}
 
 	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
+	defer operations.remove(temporaryPath)
 
 	if err := temporary.Chmod(mode); err != nil {
-		temporary.Close()
+		_ = temporary.Close()
 		return err
 	}
 
 	if err := temporary.Chown(ownerUID, ownerGID); err != nil {
-		temporary.Close()
+		_ = temporary.Close()
 		return err
 	}
 
-	if _, err := temporary.Write(content); err != nil {
-		temporary.Close()
+	written, err := temporary.Write(content)
+	if err == nil && written != len(content) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		_ = temporary.Close()
 		return err
 	}
 
 	if err := temporary.Sync(); err != nil {
-		temporary.Close()
+		_ = temporary.Close()
 		return err
 	}
 
@@ -523,11 +580,11 @@ func writeOwnedAtomicFile(
 		return err
 	}
 
-	if err := os.Rename(temporaryPath, path); err != nil {
+	if err := operations.rename(temporaryPath, path); err != nil {
 		return err
 	}
 
-	directory, err := os.Open(parent)
+	directory, err := operations.openDirectory(parent)
 	if err != nil {
 		return err
 	}
