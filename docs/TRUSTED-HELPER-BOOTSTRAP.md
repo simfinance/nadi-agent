@@ -39,16 +39,9 @@ scripts/sign-helper-package.sh \
     nadi-agent-linux-ARCH \
     ARCH \
     nadi-provision-helper_VERSION_ARCH.deb.sig
-``
+```
 
 The signer uses `go run ./cmd/nadi-release-verifier` and the embedded NADI release trust anchor. A checksum supplied independently by a caller is not sufficient authorization to sign a bootstrap package.
-
-```bash
-scripts/sign-helper-package.sh \\
-    "$NADI_RELEASE_SIGNING_PRIVATE_KEY" \\
-    nadi-provision-helper_VERSION_ARCH.deb \\
-    nadi-provision-helper_VERSION_ARCH.deb.sig
-```
 
 The server administrator must obtain the public key through the established trusted distribution channel. The verification script independently enforces the pinned fingerprint before checking the detached signature:
 
