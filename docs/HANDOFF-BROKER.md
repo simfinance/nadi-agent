@@ -71,3 +71,18 @@ The broker mapping validator now rejects credential destinations inside Laravel 
 This prevents an application runtime user from replacing a credential file through a writable application parent directory. The broker systemd source unit must keep its base write scope limited to `/run/nadi`; the future helper is responsible for generating an exact per-application `ReadWritePaths=` drop-in.
 
 **Integration dependency:** the current Laravel Bridge package configuration still defaults to `storage/app/private/nadi/credential`. Bridge must be changed to resolve the external path before this broker mapping can be used end-to-end. Until that is done, credential handoff is intentionally not production-ready.
+
+
+## Installer-managed Bridge application configuration — ADR-0003
+
+After Central enrollment is confirmed, the trusted helper writes one non-secret JSON configuration file per Laravel application at:
+
+`/var/lib/nadi-bridge/config/<sha256(canonical-application-base-path)>.json`
+
+The filename is derived from the exact canonical application base path already validated against its PHP-FPM pool. The file contains the Central-issued application ID/key, enabled state, exact verified Central source-IP allowlist, and the fixed credential and activation-state paths. It contains no credential, token, Activation Grant payload, or application data.
+
+The configuration directory is root:root mode 0711. Each configuration file is root:<application PHP-FPM primary GID> mode 0640. PHP-FPM primary GIDs must be unique across applications enrolled to one Agent. The Laravel Service Provider derives the same path from its canonical base path, verifies root ownership, exact mode, runtime GID, file type, symlink-free ancestry, and opened-descriptor identity, then loads only that application's configuration. Any mismatch keeps the Bridge disabled.
+
+The Artisan installer obtains exact source IP literals from the operator and requires confirmation that infrastructure has verified Central's actual source/NAT addresses. The helper validates IPv4/IPv6 syntax and rejects CIDR ranges, duplicates, or an empty allowlist. It never infers the source IP from DNS or the Central URL.
+
+The external configuration is written through the enrollment/RESTORE journal and verified against the persisted application inventory. RESTORE preserves mismatched or externally changed files and fails closed rather than overwriting them. See ADR-0003 in this repository for the full contract.

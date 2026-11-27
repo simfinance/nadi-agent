@@ -296,7 +296,10 @@ func installBrokerArtifactsJournaledAt(
 	return nil
 }
 
-func expectedEnrollmentJournalTargets(config handoffbroker.Config) map[string]string {
+func expectedEnrollmentJournalTargets(
+	config handoffbroker.Config,
+	centralSourceIPs []string,
+) (map[string]string, error) {
 	targets := make(map[string]string)
 
 	addDirectoryTree := func(directory string) {
@@ -312,11 +315,23 @@ func expectedEnrollmentJournalTargets(config handoffbroker.Config) map[string]st
 	addDirectoryTree(filepath.Dir(brokerMappingPath))
 	addDirectoryTree(filepath.Dir(brokerDropInPath))
 
+	configurationTargets, err := bridgeApplicationConfigurationTargets(config, centralSourceIPs)
+	if err != nil {
+		return nil, err
+	}
+	for path, resourceType := range configurationTargets {
+		if resourceType == "directory" {
+			addDirectoryTree(path)
+			continue
+		}
+		targets[path] = resourceType
+	}
+
 	targets[brokerMappingPath] = "file"
 	targets[brokerDropInPath] = "file"
 	targets[provisionCompletePath] = "file"
 
-	return targets
+	return targets, nil
 }
 
 func verifyBrokerArtifactDirectories(
@@ -334,6 +349,7 @@ func verifyBrokerArtifactDirectories(
 		mode os.FileMode
 	}{
 		{path: filepath.Join(root, "var", "lib", "nadi-bridge"), mode: bridgeDirectoryMode},
+		{path: filepath.Join(root, "var", "lib", "nadi-bridge", "config"), mode: bridgeApplicationConfigDirectoryMode},
 		{path: filepath.Join(root, "etc", "nadi"), mode: nadiConfigDirectoryMode},
 		{path: filepath.Join(root, "etc", "systemd", "system", "nadi-handoff-broker.service.d"), mode: systemDirectoryMode},
 	}

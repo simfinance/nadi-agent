@@ -7,8 +7,9 @@ const maximumProvisionRequestBytes = 64 * 1024
 var enrollmentTokenPattern = regexp.MustCompile(`^nadi_enroll_[a-f0-9]{64}$`)
 
 type ProvisionRequest struct {
-	Release      ProvisionReleaseRequest
-	Applications []ProvisionApplication
+	Release          ProvisionReleaseRequest
+	Applications     []ProvisionApplication
+	CentralSourceIPs []string
 }
 
 type ProvisionReleaseRequest struct {

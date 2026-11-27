@@ -30,18 +30,20 @@ const (
 )
 
 type ProvisionOperationRequest struct {
-	ProtocolVersion int                      `json:"protocol_version"`
-	Operation       string                   `json:"operation"`
-	Release         *ProvisionReleaseRequest `json:"release,omitempty"`
-	Applications    []ProvisionApplication   `json:"applications,omitempty"`
-	Enrollment      *ProvisionEnrollment     `json:"enrollment,omitempty"`
+	ProtocolVersion  int                      `json:"protocol_version"`
+	Operation        string                   `json:"operation"`
+	Release          *ProvisionReleaseRequest `json:"release,omitempty"`
+	Applications     []ProvisionApplication   `json:"applications,omitempty"`
+	CentralSourceIPs []string                 `json:"central_source_ips,omitempty"`
+	Enrollment       *ProvisionEnrollment     `json:"enrollment,omitempty"`
 }
 
 type provisionInventory struct {
-	ProtocolVersion int                    `json:"protocol_version"`
-	AgentVersion    string                 `json:"agent_version"`
-	ArtifactSHA256  string                 `json:"artifact_sha256"`
+	ProtocolVersion  int                    `json:"protocol_version"`
+	AgentVersion     string                 `json:"agent_version"`
+	ArtifactSHA256   string                 `json:"artifact_sha256"`
 	Applications    []ProvisionApplication `json:"applications"`
+	CentralSourceIPs []string               `json:"central_source_ips"`
 }
 
 type provisionCompletion struct {
@@ -106,6 +108,7 @@ func validateProvisionOperationFieldSet(content []byte, operation string) error 
 	case "install_agent":
 		allowed["release"] = struct{}{}
 		allowed["applications"] = struct{}{}
+		allowed["central_source_ips"] = struct{}{}
 	case "enroll_agent":
 		allowed["enrollment"] = struct{}{}
 	case "start_agent":
@@ -131,6 +134,9 @@ func validateProvisionOperationRequest(request ProvisionOperationRequest) error 
 		if request.Release == nil || request.Enrollment != nil || len(request.Applications) < 1 || len(request.Applications) > 20 {
 			return errors.New("install_agent requires release material and 1 to 20 application mappings only")
 		}
+		if _, err := normalizeCentralSourceIPs(request.CentralSourceIPs); err != nil {
+			return err
+		}
 		if strings.TrimSpace(request.Release.ManifestBase64) == "" ||
 			strings.TrimSpace(request.Release.SignatureBase64) == "" ||
 			strings.TrimSpace(request.Release.ArtifactPath) == "" {
@@ -141,6 +147,7 @@ func validateProvisionOperationRequest(request ProvisionOperationRequest) error 
 		}
 		seenKeys := make(map[string]struct{}, len(request.Applications))
 		seenUIDs := make(map[int]struct{}, len(request.Applications))
+		seenGIDs := make(map[int]struct{}, len(request.Applications))
 		seenPaths := make([]string, 0, len(request.Applications))
 		for _, application := range request.Applications {
 			if application.ApplicationKey == "" || len(application.ApplicationKey) > 100 ||
@@ -157,6 +164,9 @@ func validateProvisionOperationRequest(request ProvisionOperationRequest) error 
 			if _, exists := seenUIDs[application.RuntimeUID]; exists {
 				return errors.New("application runtime UIDs must be distinct for credential isolation")
 			}
+			if _, exists := seenGIDs[application.RuntimeGID]; exists {
+				return errors.New("application runtime GIDs must be distinct for per-application configuration isolation")
+			}
 			for _, existingPath := range seenPaths {
 				if application.BasePath == existingPath ||
 					strings.HasPrefix(application.BasePath, existingPath+string(filepath.Separator)) ||
@@ -166,6 +176,7 @@ func validateProvisionOperationRequest(request ProvisionOperationRequest) error 
 			}
 			seenKeys[application.ApplicationKey] = struct{}{}
 			seenUIDs[application.RuntimeUID] = struct{}{}
+			seenGIDs[application.RuntimeGID] = struct{}{}
 			seenPaths = append(seenPaths, application.BasePath)
 		}
 	case "enroll_agent":
@@ -257,7 +268,8 @@ func runInstallAgentOperation(request ProvisionOperationRequest, response Helper
 		Release: ProvisionReleaseRequest{
 			ArtifactPath: request.Release.ArtifactPath,
 		},
-		Applications: request.Applications,
+		Applications:     request.Applications,
+		CentralSourceIPs: request.CentralSourceIPs,
 	}
 	if err := validateApplicationTargets(legacyRequest); err != nil {
 		return writeOperationFailure(writer, errorWriter, response, err)
@@ -281,6 +293,13 @@ func runInstallAgentOperation(request ProvisionOperationRequest, response Helper
 		return writeOperationFailure(writer, errorWriter, response, err)
 	}
 	if alreadyInstalled {
+		existingInventory, inventoryErr := readProvisionInventory()
+		if inventoryErr != nil || !sameCentralSourceIPs(existingInventory.CentralSourceIPs, request.CentralSourceIPs) {
+			response.Phase = "recovery_required"
+			response.EnrollmentStatus = "unknown"
+			response.RetrySafe = false
+			return writeOperationFailure(writer, errorWriter, response, errors.New("installed Central source-IP allowlist differs from this request; explicit configuration update is required"))
+		}
 		response.Success = true
 		response.Phase = "installed"
 		response.EnrollmentStatus = "not_started"
@@ -305,9 +324,15 @@ func runInstallAgentOperation(request ProvisionOperationRequest, response Helper
 			inventory.AgentVersion == releaseManifest.Version &&
 			inventory.ArtifactSHA256 == artifact.SHA256 &&
 			sameApplicationInventory(inventory.Applications, request.Applications) &&
+			sameCentralSourceIPs(inventory.CentralSourceIPs, request.CentralSourceIPs) &&
 			completion.AgentVersion == inventory.AgentVersion &&
 			completion.ApplicationCount == len(inventory.Applications) {
-			if err := verifyExistingEnrollmentIdentity(request.Applications, inventory.ArtifactSHA256, completion); err == nil {
+			if err := verifyExistingEnrollmentIdentity(
+				request.Applications,
+				request.CentralSourceIPs,
+				inventory.ArtifactSHA256,
+				completion,
+			); err == nil {
 				response.Success = true
 				response.Phase = "enrolled"
 				response.EnrollmentStatus = "registered"
@@ -429,8 +454,9 @@ func runInstallAgentOperation(request ProvisionOperationRequest, response Helper
 	inventory := provisionInventory{
 		ProtocolVersion: 1,
 		AgentVersion:    releaseManifest.Version,
-		ArtifactSHA256:  artifact.SHA256,
-		Applications:    request.Applications,
+		ArtifactSHA256:   artifact.SHA256,
+		Applications:     request.Applications,
+		CentralSourceIPs: request.CentralSourceIPs,
 	}
 	inventoryJSON, err := json.Marshal(inventory)
 	if err != nil {
@@ -544,6 +570,7 @@ func verifyAgentIdentitySummary(
 
 func verifyExistingEnrollmentIdentity(
 	applications []ProvisionApplication,
+	centralSourceIPs []string,
 	artifactSHA256 string,
 	completion provisionCompletion,
 ) error {
@@ -557,7 +584,7 @@ func verifyExistingEnrollmentIdentity(
 		return errors.New("persisted Agent identity does not match the root-owned enrollment completion record")
 	}
 
-	_, expectedMapping, expectedDropIn, err := BuildBrokerArtifacts(
+	brokerConfig, expectedMapping, expectedDropIn, err := BuildBrokerArtifacts(
 		uint32(identity.uid),
 		uint32(identity.gid),
 		ProvisionRequest{Applications: applications},
@@ -574,6 +601,13 @@ func verifyExistingEnrollmentIdentity(
 	installedDropIn, err := readRootOwnedRegularFile(brokerDropInPath, 64*1024)
 	if err != nil || string(installedDropIn) != expectedDropIn {
 		return errors.New("installed Bridge service permissions do not match the verified Agent identity")
+	}
+	if err := verifyBridgeApplicationConfigurations(
+		brokerConfig,
+		centralSourceIPs,
+		string(os.PathSeparator),
+	); err != nil {
+		return fmt.Errorf("verify installer-managed Bridge application configuration: %w", err)
 	}
 
 	return nil
@@ -660,13 +694,15 @@ func restoreExistingAgentIdentity(
 		releaseVersion,
 		artifactSHA256,
 		request.Applications,
+		request.CentralSourceIPs,
 	)
 	if metadataErr != nil {
 		return rollbackFailure(metadataErr)
 	}
 
 	legacyRequest := ProvisionRequest{
-		Applications: request.Applications,
+		Applications:     request.Applications,
+		CentralSourceIPs: request.CentralSourceIPs,
 	}
 	brokerConfig, mappingJSON, dropIn, err := BuildBrokerArtifacts(
 		uint32(identity.uid),
@@ -687,12 +723,21 @@ func restoreExistingAgentIdentity(
 	); err != nil {
 		return rollbackFailure(fmt.Errorf("restore Bridge broker artifacts: %w", err))
 	}
+	if err := installBridgeApplicationConfigurationsJournaled(
+		brokerConfig,
+		request.CentralSourceIPs,
+		store,
+		&journal,
+	); err != nil {
+		return rollbackFailure(fmt.Errorf("restore installer-managed Bridge application configuration: %w", err))
+	}
 
 	inventory := provisionInventory{
-		ProtocolVersion: 1,
-		AgentVersion:    releaseVersion,
-		ArtifactSHA256:  artifactSHA256,
-		Applications:    request.Applications,
+		ProtocolVersion:  1,
+		AgentVersion:     releaseVersion,
+		ArtifactSHA256:   artifactSHA256,
+		Applications:     request.Applications,
+		CentralSourceIPs: request.CentralSourceIPs,
 	}
 	inventoryJSON, err := json.Marshal(inventory)
 	if err != nil {
@@ -759,6 +804,7 @@ func reconcileRestoreMetadata(
 	releaseVersion string,
 	artifactSHA256 string,
 	applications []ProvisionApplication,
+	centralSourceIPs []string,
 ) (bool, bool, error) {
 	if completion != nil {
 		if completion.AgentInstanceID != identity.AgentInstanceID ||
@@ -775,7 +821,8 @@ func reconcileRestoreMetadata(
 	if inventory != nil {
 		if inventory.AgentVersion != releaseVersion ||
 			inventory.ArtifactSHA256 != artifactSHA256 ||
-			!sameApplicationInventory(inventory.Applications, applications) {
+			!sameApplicationInventory(inventory.Applications, applications) ||
+			!sameCentralSourceIPs(inventory.CentralSourceIPs, centralSourceIPs) {
 			return false, false, errors.New("RESTORE cannot replace the installed Agent release identity or application inventory")
 		}
 	}
@@ -893,14 +940,20 @@ func recoverEnrollmentJournal(inventory provisionInventory) error {
 	brokerConfig, mappingJSON, dropIn, err := BuildBrokerArtifacts(
 		uint32(identity.uid),
 		uint32(identity.gid),
-		ProvisionRequest{Applications: inventory.Applications},
+		ProvisionRequest{
+			Applications:     inventory.Applications,
+			CentralSourceIPs: inventory.CentralSourceIPs,
+		},
 		summaryJSON,
 	)
 	if err != nil {
 		return fmt.Errorf("rebuild expected Bridge artifacts from verified Agent identity: %w", err)
 	}
 
-	expectedTargets := expectedEnrollmentJournalTargets(brokerConfig)
+	expectedTargets, err := expectedEnrollmentJournalTargets(brokerConfig, inventory.CentralSourceIPs)
+	if err != nil {
+		return fmt.Errorf("build expected enrollment journal targets: %w", err)
+	}
 	if journal.Phase == "committed" {
 		if err := verifyEnrollmentJournalActions(&journal, expectedTargets); err != nil {
 			return fmt.Errorf("verify committed enrollment journal: %w", err)
@@ -918,6 +971,7 @@ func recoverEnrollmentJournal(inventory provisionInventory) error {
 		}
 		if err := verifyExistingEnrollmentIdentity(
 			inventory.Applications,
+			inventory.CentralSourceIPs,
 			inventory.ArtifactSHA256,
 			completion,
 		); err != nil {
@@ -959,6 +1013,14 @@ func recoverEnrollmentJournal(inventory provisionInventory) error {
 	); err != nil {
 		return fmt.Errorf("reconcile Bridge mapping and systemd drop-in: %w", err)
 	}
+	if err := installBridgeApplicationConfigurationsJournaled(
+		brokerConfig,
+		inventory.CentralSourceIPs,
+		store,
+		&journal,
+	); err != nil {
+		return fmt.Errorf("reconcile installer-managed Bridge application configuration: %w", err)
+	}
 
 	if !completionExists {
 		completion = provisionCompletion{
@@ -989,6 +1051,7 @@ func recoverEnrollmentJournal(inventory provisionInventory) error {
 
 	if err := verifyExistingEnrollmentIdentity(
 		inventory.Applications,
+		inventory.CentralSourceIPs,
 		inventory.ArtifactSHA256,
 		completion,
 	); err != nil {
@@ -1070,7 +1133,12 @@ func runEnrollAgentOperation(request ProvisionOperationRequest, response HelperR
 			response.RetrySafe = false
 			return writeOperationFailure(writer, errorWriter, response, errors.New("enrollment completion record does not match the installed inventory"))
 		}
-		if err := verifyExistingEnrollmentIdentity(inventory.Applications, inventory.ArtifactSHA256, completion); err != nil {
+		if err := verifyExistingEnrollmentIdentity(
+			inventory.Applications,
+			inventory.CentralSourceIPs,
+			inventory.ArtifactSHA256,
+			completion,
+		); err != nil {
 			response.Phase = "recovery_required"
 			response.EnrollmentStatus = "unknown"
 			response.RetrySafe = false
@@ -1142,7 +1210,10 @@ func runEnrollAgentOperation(request ProvisionOperationRequest, response HelperR
 	if err != nil {
 		return writeOperationFailure(writer, errorWriter, response, err)
 	}
-	legacyRequest := ProvisionRequest{Applications: inventory.Applications}
+	legacyRequest := ProvisionRequest{
+		Applications:     inventory.Applications,
+		CentralSourceIPs: inventory.CentralSourceIPs,
+	}
 	if err := validateApplicationTargets(legacyRequest); err != nil {
 		return writeOperationFailure(writer, errorWriter, response, err)
 	}
@@ -1221,6 +1292,17 @@ func runEnrollAgentOperation(request ProvisionOperationRequest, response HelperR
 		&journal,
 	); err != nil {
 		response.Message = "Central enrollment succeeded, but Bridge artifact installation is incomplete. Preserve the enrollment journal and Agent state; do not repeat enrollment."
+		writeHelperResponse(writer, response)
+		fmt.Fprintln(errorWriter, response.Message)
+		return 1
+	}
+	if err := installBridgeApplicationConfigurationsJournaled(
+		brokerConfig,
+		inventory.CentralSourceIPs,
+		journalStore,
+		&journal,
+	); err != nil {
+		response.Message = "Central enrollment succeeded, but installer-managed Bridge application configuration is incomplete. Preserve the enrollment journal and Agent state; do not repeat enrollment."
 		writeHelperResponse(writer, response)
 		fmt.Fprintln(errorWriter, response.Message)
 		return 1
@@ -1306,7 +1388,12 @@ func runStartAgentOperation(response HelperResponse, writer io.Writer, errorWrit
 	response.AgentVersion = completion.AgentVersion
 	response.ApplicationCount = completion.ApplicationCount
 
-	if err := verifyExistingEnrollmentIdentity(inventory.Applications, inventory.ArtifactSHA256, completion); err != nil {
+	if err := verifyExistingEnrollmentIdentity(
+		inventory.Applications,
+		inventory.CentralSourceIPs,
+		inventory.ArtifactSHA256,
+		completion,
+	); err != nil {
 		response.Phase = "recovery_required"
 		response.EnrollmentStatus = "unknown"
 		response.RetrySafe = false
@@ -1346,6 +1433,46 @@ func decodeProvisionEnrollmentManifest(content []byte) (provisionEnrollmentManif
 		return provisionEnrollmentManifest{}, errors.New("enrollment manifest must contain 1 to 20 applications")
 	}
 	return manifest, nil
+}
+
+func sameCentralSourceIPs(installed []string, requested []string) bool {
+	normalizedInstalled, installedErr := normalizeCentralSourceIPs(installed)
+	normalizedRequested, requestedErr := normalizeCentralSourceIPs(requested)
+	if installedErr != nil || requestedErr != nil || len(normalizedInstalled) != len(normalizedRequested) {
+		return false
+	}
+
+	installedSet := make(map[string]struct{}, len(normalizedInstalled))
+	for _, address := range normalizedInstalled {
+		installedSet[address] = struct{}{}
+	}
+	for _, address := range normalizedRequested {
+		if _, exists := installedSet[address]; !exists {
+			return false
+		}
+	}
+
+	return true
+}
+
+func sameCentralSourceIPs(installed []string, requested []string) bool {
+	normalizedInstalled, installedErr := normalizeCentralSourceIPs(installed)
+	normalizedRequested, requestedErr := normalizeCentralSourceIPs(requested)
+	if installedErr != nil || requestedErr != nil || len(normalizedInstalled) != len(normalizedRequested) {
+		return false
+	}
+
+	installedSet := make(map[string]struct{}, len(normalizedInstalled))
+	for _, address := range normalizedInstalled {
+		installedSet[address] = struct{}{}
+	}
+	for _, address := range normalizedRequested {
+		if _, exists := installedSet[address]; !exists {
+			return false
+		}
+	}
+
+	return true
 }
 
 func sameApplicationInventory(installed []ProvisionApplication, requested []ProvisionApplication) bool {
@@ -1421,6 +1548,9 @@ func readProvisionInventory() (provisionInventory, error) {
 		!validSHA256Digest(inventory.ArtifactSHA256) ||
 		len(inventory.Applications) < 1 || len(inventory.Applications) > 20 {
 		return provisionInventory{}, errors.New("root-owned provisioning inventory is invalid")
+	}
+	if _, err := normalizeCentralSourceIPs(inventory.CentralSourceIPs); err != nil {
+		return provisionInventory{}, errors.New("root-owned provisioning inventory Central source-IP allowlist is invalid")
 	}
 	return inventory, nil
 }

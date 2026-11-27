@@ -105,6 +105,7 @@ func validInstallOperationRequest() ProvisionOperationRequest {
 			SignatureBase64: "signature",
 			ArtifactPath:    "/srv/www/application-one/storage/app/private/nadi/releases/staging/nadi-agent",
 		},
+		CentralSourceIPs: []string{"203.0.113.10"},
 		Applications: []ProvisionApplication{
 			{
 				ApplicationKey: "application-one",
@@ -119,6 +120,34 @@ func validInstallOperationRequest() ProvisionOperationRequest {
 				RuntimeGID:     1002,
 			},
 		},
+	}
+}
+
+
+func TestValidateInstallOperationRejectsDuplicateRuntimeGID(t *testing.T) {
+	request := validInstallOperationRequest()
+	request.Applications[1].RuntimeGID = request.Applications[0].RuntimeGID
+
+	if err := validateProvisionOperationRequest(request); err == nil {
+		t.Fatal("duplicate runtime GID must be rejected for per-application configuration isolation")
+	}
+}
+
+func TestValidateInstallOperationRejectsInvalidCentralSourceIP(t *testing.T) {
+	request := validInstallOperationRequest()
+	request.CentralSourceIPs = []string{"https://central.example.test"}
+
+	if err := validateProvisionOperationRequest(request); err == nil {
+		t.Fatal("Central source allowlist must contain exact IP addresses")
+	}
+}
+
+func TestSameCentralSourceIPsIgnoresOrderAndCanonicalizesIPv6(t *testing.T) {
+	installed := []string{"203.0.113.10", "2001:0db8:0:0:0:0:0:1"}
+	requested := []string{"2001:db8::1", "203.0.113.10"}
+
+	if !sameCentralSourceIPs(installed, requested) {
+		t.Fatal("equivalent exact source IP addresses must compare equal")
 	}
 }
 
