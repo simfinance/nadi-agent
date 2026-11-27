@@ -103,21 +103,27 @@ jobs:
                   openssl genpkey -algorithm ED25519 -out "$temporary_directory/test-signing-private.pem"
                   openssl pkey -in "$temporary_directory/test-signing-private.pem" -pubout -out "$temporary_directory/test-signing-public.pem"
 
+                  agent_version="$(sed -nE 's/^[[:space:]]*Agent[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' internal/version/version.go)"
+                  if [ -z "$agent_version" ]; then
+                      printf 'Unable to read Agent version from source.\n' >&2
+                      exit 1
+                  fi
+
                   for architecture in amd64 arm64; do
                       binary_path="$temporary_directory/nadi-agent-$architecture"
-                      package_path="$temporary_directory/nadi-provision-helper_0.7.5-dev_$architecture.deb"
+                      package_path="$temporary_directory/nadi-provision-helper_${agent_version}_${architecture}.deb"
 
                       GOOS=linux GOARCH="$architecture" CGO_ENABLED=0 go build -o "$binary_path" ./cmd/nadi-agent
                       digest="$(sha256sum "$binary_path" | awk '{print $1}')"
 
                       scripts/build-helper-deb.sh \
                           "$binary_path" \
-                          "0.7.5-dev" \
+                          "${agent_version}" \
                           "$architecture" \
                           "$digest" \
                           "$package_path"
 
-                      scripts/test-helper-deb.sh "$package_path" "0.7.5-dev" "$architecture"
+                      scripts/test-helper-deb.sh "$package_path" "${agent_version}" "$architecture"
 
                       openssl pkeyutl \
                           -sign \
@@ -132,7 +138,7 @@ jobs:
                           "$package_path.sig"
                   done
 
-                  sudo dpkg -i "$temporary_directory/nadi-provision-helper_0.7.5-dev_amd64.deb"
+                  sudo dpkg -i "$temporary_directory/nadi-provision-helper_${agent_version}_amd64.deb"
 
                   installed_metadata="$(stat -c '%u:%g:%a' /usr/libexec/nadi/nadi-provision)"
                   if [ "$installed_metadata" != "0:0:755" ]; then
