@@ -47,6 +47,15 @@ func main() {
     fmt.Print(formatReleaseMetadata(manifest, artifact))
 }
 
+func formatReleaseMetadata(manifest provision.ReleaseManifest, artifact provision.ReleaseArtifact) string {
+    return fmt.Sprintf("%s\t%s\t%s\t%s\n",
+        manifest.Version,
+        artifact.Architecture,
+        artifact.Filename,
+        artifact.SHA256,
+    )
+}
+
 func readRegularFile(path string, maximumSize int64) ([]byte, error) {
     if path == "" || !filepath.IsAbs(path) {
         return nil, errors.New("release input path must be absolute")
