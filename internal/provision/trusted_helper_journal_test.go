@@ -158,7 +158,8 @@ func TestInstallAgentAssetsJournaledRefusesToReplaceCorruptHelper(t *testing.T) 
 		t.Fatalf("install verified Agent assets: %v", err)
 	}
 
-	corruptHelper := []byte("corrupt helper binary")
+	corruptHelper := append([]byte(nil), artifact...)
+	corruptHelper[0] ^= 0xff
 	if err := os.WriteFile(helperPath, corruptHelper, 0755); err != nil {
 		t.Fatal(err)
 	}
