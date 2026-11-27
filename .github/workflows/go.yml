@@ -1,9 +1,6 @@
 name: Go validation
 
 on:
-    push:
-        branches:
-            - feature/bridge-activation-publisher
     pull_request:
         types:
             - opened
@@ -14,7 +11,7 @@ permissions:
     contents: read
 
 concurrency:
-    group: go-validation-${{ github.event.pull_request.number || github.ref }}
+    group: go-validation-${{ github.event.pull_request.number }}
     cancel-in-progress: true
 
 jobs:
@@ -26,8 +23,8 @@ jobs:
             - name: Checkout Agent pull request head
               uses: actions/checkout@v4
               with:
-                  repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-                  ref: ${{ github.event.pull_request.head.sha || github.sha }}
+                  repository: ${{ github.event.pull_request.head.repo.full_name }}
+                  ref: ${{ github.event.pull_request.head.sha }}
 
             - name: Set up Go
               uses: actions/setup-go@v5
