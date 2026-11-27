@@ -209,11 +209,13 @@ func TestReconcileRestoreMetadataPreservesVerifiedRecords(t *testing.T) {
 		AgentID:          identity.AgentID,
 		ServerID:         identity.ServerID,
 	}
+	centralSourceIPs := []string{"203.0.113.10"}
 	inventory := provisionInventory{
-		ProtocolVersion: 1,
-		AgentVersion:    "1.2.3",
-		ArtifactSHA256:  strings.Repeat("a", 64),
-		Applications:    applications,
+		ProtocolVersion:  1,
+		AgentVersion:     "1.2.3",
+		ArtifactSHA256:   strings.Repeat("a", 64),
+		Applications:     applications,
+		CentralSourceIPs: centralSourceIPs,
 	}
 
 	tests := []struct {
@@ -311,6 +313,7 @@ func TestReconcileRestoreMetadataPreservesVerifiedRecords(t *testing.T) {
 				"1.2.3",
 				strings.Repeat("a", 64),
 				applications,
+				centralSourceIPs,
 			)
 
 			if (err != nil) != test.wantError {
