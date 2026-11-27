@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"nadi-agent/internal/appmonitor"
@@ -35,6 +36,7 @@ type Record struct {
 }
 
 type Store struct {
+	mu         sync.RWMutex
 	directory  string
 	maxBytes   int64
 	maxRecords int
@@ -54,6 +56,9 @@ func Open(directory string, maxBytes int64, maxRecords int) (*Store, error) {
 }
 
 func (s *Store) Append(serverID string, agentID string, applicationID string, snapshot appmonitor.Snapshot) (Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if strings.TrimSpace(serverID) == "" || strings.TrimSpace(agentID) == "" || strings.TrimSpace(applicationID) == "" {
 		return Record{}, errors.New("server_id, agent_id, and application_id are required")
 	}
@@ -105,6 +110,9 @@ func (s *Store) Append(serverID string, agentID string, applicationID string, sn
 }
 
 func (s *Store) ReadBatch(applicationID string, limit int) ([]Record, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	if strings.TrimSpace(applicationID) == "" || limit <= 0 {
 		return nil, errors.New("application_id and positive batch limit are required")
 	}
@@ -139,6 +147,9 @@ func (s *Store) ReadBatch(applicationID string, limit int) ([]Record, error) {
 }
 
 func (s *Store) Acknowledge(applicationID string, eventIDs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if strings.TrimSpace(applicationID) == "" {
 		return errors.New("application_id is required")
 	}
@@ -227,6 +238,9 @@ func (s *Store) Acknowledge(applicationID string, eventIDs []string) error {
 }
 
 func (s *Store) Clear(applicationID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if strings.TrimSpace(applicationID) == "" {
 		return errors.New("application_id is required")
 	}

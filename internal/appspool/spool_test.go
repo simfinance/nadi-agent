@@ -1,6 +1,8 @@
 package appspool
 
 import (
+	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -85,5 +87,63 @@ func TestApplicationSpoolAcknowledgesOnlyMatchingApplicationEvents(t *testing.T)
 	}
 	if len(appTwo) != 1 {
 		t.Fatal("acknowledging app-1 changed app-2 spool")
+	}
+}
+
+
+func TestConcurrentAppendCannotExceedApplicationCapacity(t *testing.T) {
+	store, err := Open(t.TempDir(), 1024*1024, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const workers = 16
+	var wait sync.WaitGroup
+	var mu sync.Mutex
+	successes := 0
+	full := 0
+	unexpected := make([]error, 0)
+
+	for index := 0; index < workers; index++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+
+			_, appendErr := store.Append(
+				"server-1",
+				"agent-1",
+				"app-1",
+				appmonitor.Snapshot{Timestamp: time.Now().UTC()},
+			)
+
+			mu.Lock()
+			defer mu.Unlock()
+
+			switch {
+			case appendErr == nil:
+				successes++
+			case errors.Is(appendErr, ErrFull):
+				full++
+			default:
+				unexpected = append(unexpected, appendErr)
+			}
+		}()
+	}
+
+	wait.Wait()
+
+	if len(unexpected) > 0 {
+		t.Fatalf("unexpected append errors: %v", unexpected)
+	}
+	if successes != 1 || full != workers-1 {
+		t.Fatalf("application capacity was not enforced under concurrency: successes=%d full=%d", successes, full)
+	}
+
+	records, err := store.ReadBatch("app-1", workers)
+	if err != nil {
+		t.Fatalf("read application spool: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected exactly one persisted application record, got %d", len(records))
 	}
 }
