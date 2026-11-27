@@ -963,7 +963,6 @@ func newUUID() (string, error) {
 	return encoded[0:8] + "-" + encoded[8:12] + "-" + encoded[12:16] + "-" + encoded[16:20] + "-" + encoded[20:32], nil
 }
 
-
 func writeAll(writer io.Writer, content []byte) error {
 	for len(content) > 0 {
 		written, err := writer.Write(content)

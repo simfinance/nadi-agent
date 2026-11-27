@@ -1,8 +1,8 @@
 package telemetry
 
 import (
-	"bytes"
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1047,7 +1047,6 @@ func TestSenderConcurrentPendingInspectionAndCompletionIsRaceSafe(t *testing.T) 
 		t.Fatalf("complete pending batch: %v", err)
 	}
 }
-
 
 type shortWriter struct {
 	maximumWrite int
