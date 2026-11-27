@@ -53,7 +53,11 @@ The helper reuses the trusted command path validator for the parent-directory ch
 - The Agent-side `install_agent` implementation copies the verified artifact byte-for-byte to the helper destination, but this has not been validated on a disposable Ubuntu host.
 - No Composer script installs, replaces, or invokes the root-owned helper.
 - No sudoers file is generated or installed.
-- No caller principal or shared privilege group is inferred. The exact PHP-FPM/Artisan execution identity and narrow sudoers rule require an approved runtime identity contract.
+- The approved installer caller is either `root` directly or a verified deployment/administrator Unix account with sudo authorization.
+- A root caller invokes the fixed helper directly and does not require sudoers.
+- A non-root caller invokes the helper only through `/usr/bin/sudo -n -- /usr/libexec/nadi/nadi-provision --request-stdin`; its account must have a narrow, root-owned, mode-0440 sudoers rule for that exact command, validated with `visudo -cf`.
+- The Composer package never requests, stores, or forwards a sudo password. Interactive sudo prompting is not supported.
+- The PHP-FPM runtime identity remains separate from the installer caller and from the `nadi-agent` service identity.
 - No privileged-host installation or systemd integration test is claimed.
 
 The helper must not be exposed through a wildcard sudoers rule, a caller-selected executable, or a broad command alias. A future package must install both copies from the same verified release artifact, preserve the fixed path and permissions, and be verified independently of Composer.
