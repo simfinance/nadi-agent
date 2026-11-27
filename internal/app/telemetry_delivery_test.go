@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -236,6 +238,7 @@ func newTelemetryDeliveryTestAgent(
 	}
 
 	agent := &App{
+		logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
 		telemetrySpool:   serverSpool,
 		applicationSpool: applicationSpool,
 		telemetrySender:  sender,
