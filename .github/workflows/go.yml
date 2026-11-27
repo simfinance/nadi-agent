@@ -109,6 +109,15 @@ jobs:
                       exit 1
                   fi
 
+                  printf '%s\n' '{"schema_version":1,"product":"nadi-agent","key_id":"nadi-agent-release-2026-01","version":"0.0.0","protocol_version":1,"released_at":"2026-11-27T00:00:00Z","artifacts":[]}' > "$temporary_directory/invalid-manifest.json"
+                  openssl pkeyutl \
+                      -sign \
+                      -rawin \
+                      -inkey "$temporary_directory/test-signing-private.pem" \
+                      -in "$temporary_directory/invalid-manifest.json" \
+                      -out "$temporary_directory/invalid-manifest.sig"
+                  base64 -w0 "$temporary_directory/invalid-manifest.sig" > "$temporary_directory/invalid-manifest.sig.b64"
+
                   for architecture in amd64 arm64; do
                       binary_path="$temporary_directory/nadi-agent-$architecture"
                       package_path="$temporary_directory/nadi-provision-helper_${agent_version}_${architecture}.deb"
@@ -162,15 +171,6 @@ jobs:
                       fi
                       grep -F 'Release private key does not match the pinned NADI trust anchor' "$temporary_directory/sign-error.txt"
                   done
-
-                  printf '%s\n' '{"schema_version":1,"product":"nadi-agent","key_id":"nadi-agent-release-2026-01","version":"0.0.0","protocol_version":1,"released_at":"2026-11-27T00:00:00Z","artifacts":[]}' > "$temporary_directory/invalid-manifest.json"
-                  openssl pkeyutl \
-                      -sign \
-                      -rawin \
-                      -inkey "$temporary_directory/test-signing-private.pem" \
-                      -in "$temporary_directory/invalid-manifest.json" \
-                      -out "$temporary_directory/invalid-manifest.sig"
-                  base64 -w0 "$temporary_directory/invalid-manifest.sig" > "$temporary_directory/invalid-manifest.sig.b64"
 
                   if go run ./cmd/nadi-release-verifier \
                       "$temporary_directory/invalid-manifest.json" \
