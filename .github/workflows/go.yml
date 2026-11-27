@@ -150,15 +150,15 @@ jobs:
                                   ;;
                           esac
 
-                          if scripts/verify-helper-package-signature.sh \\
-                              "$verifier_public_key" \\
-                              "$verifier_package" \\
+                          if scripts/verify-helper-package-signature.sh \
+                              "$verifier_public_key" \
+                              "$verifier_package" \
                               "$verifier_signature" 2>"$temporary_directory/verify-symlink-error.txt"; then
-                              printf 'Verifier accepted a symlinked %s input.\\n' "$input_case" >&2
+                              printf 'Verifier accepted a symlinked %s input.\n' "$input_case" >&2
                               exit 1
                           fi
                           if ! grep -Fq 'regular non-symlink files' "$temporary_directory/verify-symlink-error.txt"; then
-                              printf 'Verifier did not reject the symlinked %s input as expected. Diagnostic follows:\\n' "$input_case" >&2
+                              printf 'Verifier did not reject the symlinked %s input as expected. Diagnostic follows:\n' "$input_case" >&2
                               cat "$temporary_directory/verify-symlink-error.txt" >&2
                               exit 1
                           fi
