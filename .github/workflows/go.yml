@@ -1,6 +1,9 @@
 name: Go validation
 
 on:
+    push:
+        branches:
+            - feature/bridge-activation-publisher
     pull_request:
         types:
             - opened
