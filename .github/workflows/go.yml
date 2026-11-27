@@ -100,6 +100,9 @@ jobs:
                   temporary_directory="$(mktemp -d)"
                   trap 'sudo dpkg -r nadi-provision-helper >/dev/null 2>&1 || true; rm -rf "$temporary_directory"' EXIT
 
+                  openssl genpkey -algorithm ED25519 -out "$temporary_directory/test-signing-private.pem"
+                  openssl pkey -in "$temporary_directory/test-signing-private.pem" -pubout -out "$temporary_directory/test-signing-public.pem"
+
                   for architecture in amd64 arm64; do
                       binary_path="$temporary_directory/nadi-agent-$architecture"
                       package_path="$temporary_directory/nadi-provision-helper_0.7.5_$architecture.deb"
@@ -116,13 +119,25 @@ jobs:
 
                       scripts/test-helper-deb.sh "$package_path" "0.7.5" "$architecture"
 
-                      sudo dpkg -i "$package_path"
+                      openssl pkeyutl \
+                          -sign \
+                          -rawin \
+                          -inkey "$temporary_directory/test-signing-private.pem" \
+                          -in "$package_path" \
+                          -out "$package_path.sig"
 
-                      installed_metadata="$(stat -c '%u:%g:%a' /usr/libexec/nadi/nadi-provision)"
-                      if [ "$installed_metadata" != "0:0:755" ]; then
-                          printf 'Installed helper metadata is invalid: %s\\n' "$installed_metadata" >&2
-                          exit 1
-                      fi
-
-                      sudo dpkg -r nadi-provision-helper
+                      scripts/verify-helper-package-signature.sh \
+                          "$temporary_directory/test-signing-public.pem" \
+                          "$package_path" \
+                          "$package_path.sig"
                   done
+
+                  sudo dpkg -i "$temporary_directory/nadi-provision-helper_0.7.5_amd64.deb"
+
+                  installed_metadata="$(stat -c '%u:%g:%a' /usr/libexec/nadi/nadi-provision)"
+                  if [ "$installed_metadata" != "0:0:755" ]; then
+                      printf 'Installed helper metadata is invalid: %s\n' "$installed_metadata" >&2
+                      exit 1
+                  fi
+
+                  sudo dpkg -r nadi-provision-helper
