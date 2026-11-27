@@ -48,7 +48,7 @@ func main() {
 }
 
 func formatReleaseMetadata(manifest provision.ReleaseManifest, artifact provision.ReleaseArtifact) string {
-	return fmt.Sprintf("%s\\t%s\\t%s\\t%s\\n",
+	return fmt.Sprintf("%s\t%s\t%s\t%s\n",
 		manifest.Version,
 		artifact.Architecture,
 		artifact.Filename,

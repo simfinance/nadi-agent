@@ -18,7 +18,7 @@ func TestFormatReleaseMetadataUsesTabDelimitedFields(t *testing.T) {
 	}
 
 	got := formatReleaseMetadata(manifest, artifact)
-	want := "1.2.3\\tamd64\\tnadi-agent-linux-amd64\\t" + strings.Repeat("a", 64) + "\\n"
+	want := "1.2.3\tamd64\tnadi-agent-linux-amd64\t" + strings.Repeat("a", 64) + "\n"
 
 	if got != want {
 		t.Fatalf("formatReleaseMetadata() = %q, want %q", got, want)
