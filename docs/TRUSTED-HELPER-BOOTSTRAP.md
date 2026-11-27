@@ -31,15 +31,13 @@ The package contains no maintainer scripts, service units, configuration files, 
 The release process must produce a detached Ed25519 signature over the complete \`.deb\` package using the existing NADI Agent release signing key. The release signer performs this operation in its protected signing environment; the private key is never placed in the repository, CI logs, or the customer server:
 
 \`\`\`bash
-openssl pkeyutl \\
-    -sign \\
-    -rawin \\
-    -inkey "$NADI_RELEASE_SIGNING_PRIVATE_KEY" \\
-    -in nadi-provision-helper_VERSION_ARCH.deb \\
-    -out nadi-provision-helper_VERSION_ARCH.deb.sig
+scripts/sign-helper-package.sh \\
+    "$NADI_RELEASE_SIGNING_PRIVATE_KEY" \\
+    nadi-provision-helper_VERSION_ARCH.deb \\
+    nadi-provision-helper_VERSION_ARCH.deb.sig
 \`\`\`
 
-The server administrator must obtain the public key through the established trusted distribution channel and verify its pinned fingerprint before use:
+The server administrator must obtain the public key through the established trusted distribution channel. The verification script independently enforces the pinned fingerprint before checking the detached signature:
 
 ```text
 91d063a323ffb7feaad3e4bf39d750ec339b2206b74f762d11e1f291267a49e1

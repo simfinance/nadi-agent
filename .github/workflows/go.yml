@@ -132,10 +132,29 @@ jobs:
                           -in "$package_path" \
                           -out "$package_path.sig"
 
-                      scripts/verify-helper-package-signature.sh \
+                      openssl pkeyutl \
+                          -verify \
+                          -pubin \
+                          -inkey "$temporary_directory/test-signing-public.pem" \
+                          -rawin \
+                          -in "$package_path" \
+                          -sigfile "$package_path.sig"
+
+                      if scripts/verify-helper-package-signature.sh \
                           "$temporary_directory/test-signing-public.pem" \
                           "$package_path" \
-                          "$package_path.sig"
+                          "$package_path.sig"; then
+                          printf 'Verifier accepted a public key outside the pinned NADI trust anchor.\\n' >&2
+                          exit 1
+                      fi
+
+                      if scripts/sign-helper-package.sh \
+                          "$temporary_directory/test-signing-private.pem" \
+                          "$package_path" \
+                          "$package_path.production-test.sig"; then
+                          printf 'Signer accepted a private key outside the pinned NADI trust anchor.\\n' >&2
+                          exit 1
+                      fi
                   done
 
                   sudo dpkg -i "$temporary_directory/nadi-provision-helper_${agent_version}_amd64.deb"
