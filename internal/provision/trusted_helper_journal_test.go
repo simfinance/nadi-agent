@@ -247,3 +247,54 @@ func prepareAgentAssetDirectories(t *testing.T, root string) {
 		}
 	}
 }
+
+func TestProvisionJournalRollbackPreservesResourceChangedAfterTransaction(t *testing.T) {
+	directory := t.TempDir()
+	journalPath := filepath.Join(directory, "provisioning-journal.json")
+	targetPath := filepath.Join(directory, "agent-owned-file")
+
+	store, journal, err := newProvisionJournal(journalPath)
+	if err != nil {
+		t.Fatalf("create provisioning journal: %v", err)
+	}
+
+	actionIndex, err := store.AddIntent(&journal, "file", targetPath)
+	if err != nil {
+		t.Fatalf("record file installation intent: %v", err)
+	}
+
+	transactionContent := []byte("file created by this provisioning transaction")
+	if err := os.WriteFile(targetPath, transactionContent, 0600); err != nil {
+		t.Fatalf("create transaction-owned file: %v", err)
+	}
+	if err := store.MarkApplied(&journal, actionIndex); err != nil {
+		t.Fatalf("record transaction-owned file fingerprint: %v", err)
+	}
+
+	if err := os.Remove(targetPath); err != nil {
+		t.Fatalf("remove transaction-owned file to simulate external replacement: %v", err)
+	}
+	externalContent := []byte("file replaced outside the provisioning transaction")
+	if err := os.WriteFile(targetPath, externalContent, 0600); err != nil {
+		t.Fatalf("create externally replaced file: %v", err)
+	}
+
+	if err := store.Rollback(&journal, []string{directory}); err == nil {
+		t.Fatal("rollback must refuse to remove a resource that no longer matches its transaction fingerprint")
+	}
+
+	actual, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("read externally replaced file after refused rollback: %v", err)
+	}
+	if string(actual) != string(externalContent) {
+		t.Fatal("rollback changed or removed a file that no longer belongs to the transaction")
+	}
+
+	if journal.Phase != "rollback_required" {
+		t.Fatalf("expected rollback_required phase after a fingerprint mismatch, got %q", journal.Phase)
+	}
+	if len(journal.Actions) != 1 || journal.Actions[0].State != "applied" || journal.Actions[0].Fingerprint == nil {
+		t.Fatalf("rollback must preserve the unapplied-to-rollback evidence, got %#v", journal.Actions)
+	}
+}
