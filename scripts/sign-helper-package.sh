@@ -54,7 +54,7 @@ fi
 script_directory="$(cd "$(dirname "$0")" && pwd)"
 repository_root="$(cd "$script_directory/.." && pwd)"
 
-release_metadata="$(cd "$repository_root" && go run ./scripts/verify-release-artifact.go \
+release_metadata="$(cd "$repository_root" && go run ./cmd/nadi-release-verifier \
     "$manifest_path" \
     "$manifest_signature_path" \
     "$agent_binary" \

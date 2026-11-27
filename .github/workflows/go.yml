@@ -172,7 +172,7 @@ jobs:
                       -out "$temporary_directory/invalid-manifest.sig"
                   base64 -w0 "$temporary_directory/invalid-manifest.sig" > "$temporary_directory/invalid-manifest.sig.b64"
 
-                  if go run ./scripts/verify-release-artifact.go \
+                  if go run ./cmd/nadi-release-verifier \
                       "$temporary_directory/invalid-manifest.json" \
                       "$temporary_directory/invalid-manifest.sig.b64" \
                       "$temporary_directory/nadi-agent-amd64" \
