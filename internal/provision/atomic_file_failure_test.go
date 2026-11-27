@@ -178,7 +178,6 @@ func TestWriteOwnedAtomicFileFailureBoundaries(t *testing.T) {
 	}
 }
 
-
 func TestProvisionJournalSaveFailureBoundaries(t *testing.T) {
 	failureStages := []string{
 		"create",
