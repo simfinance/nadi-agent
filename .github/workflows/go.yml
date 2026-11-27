@@ -142,6 +142,26 @@ jobs:
                           cat "$temporary_directory/sign-error.txt" >&2
                           exit 1
                       fi
+
+                      if (
+                          cd "$temporary_directory"
+                          bash "$GITHUB_WORKSPACE/scripts/sign-helper-package.sh" \
+                              "test-signing-private.pem" \
+                              "nadi-provision-helper_${agent_version}_${architecture}.deb" \
+                              "invalid-manifest.json" \
+                              "invalid-manifest.sig.b64" \
+                              "nadi-agent-${architecture}" \
+                              "$architecture" \
+                              "relative-output.sig"
+                      ) 2>"$temporary_directory/sign-relative-error.txt"; then
+                          printf 'Signer unexpectedly accepted an untrusted key with relative input paths.\n' >&2
+                          exit 1
+                      fi
+                      if ! grep -Fq 'trust anchor' "$temporary_directory/sign-relative-error.txt"; then
+                          printf 'Relative-path signer rejection did not reach the pinned trust-anchor check. Diagnostic follows:\n' >&2
+                          cat "$temporary_directory/sign-relative-error.txt" >&2
+                          exit 1
+                      fi
                   done
 
                   if go run ./cmd/nadi-release-verifier \
