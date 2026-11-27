@@ -971,7 +971,6 @@ func TestBuildPendingRejectsNginxErrorLogsWithApplicationID(t *testing.T) {
 	}
 }
 
-
 func TestSenderConcurrentPendingInspectionAndCompletionIsRaceSafe(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		var batch Batch
