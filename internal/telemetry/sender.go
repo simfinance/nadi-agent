@@ -141,13 +141,31 @@ type Sender struct {
 }
 
 func NewSender(baseURL string, directory string, timeout time.Duration) (*Sender, error) {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+
+	client := &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	return NewSenderWithHTTPClient(baseURL, directory, client)
+}
+
+// NewSenderWithHTTPClient creates a sender with an injected HTTP client.
+// Redirects remain disabled so test transports cannot weaken delivery policy.
+func NewSenderWithHTTPClient(baseURL string, directory string, client *http.Client) (*Sender, error) {
 	parsed, err := url.Parse(baseURL)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
 		return nil, errors.New("telemetry Central URL must be an absolute HTTPS URL without userinfo or fragment")
 	}
-	if timeout <= 0 {
-		timeout = 10 * time.Second
+	if client == nil {
+		return nil, errors.New("telemetry HTTP client is required")
 	}
+
 	if err := os.MkdirAll(directory, 0700); err != nil {
 		return nil, fmt.Errorf("create telemetry sender state directory: %w", err)
 	}
@@ -155,15 +173,15 @@ func NewSender(baseURL string, directory string, timeout time.Duration) (*Sender
 		return nil, fmt.Errorf("secure telemetry sender state directory: %w", err)
 	}
 
+	clientCopy := *client
+	clientCopy.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+
 	return &Sender{
 		baseURL: strings.TrimRight(baseURL, "/"),
-		client: &http.Client{
-			Timeout: timeout,
-			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		},
-		dir: directory,
+		client:  &clientCopy,
+		dir:     directory,
 	}, nil
 }
 
