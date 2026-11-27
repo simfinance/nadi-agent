@@ -98,7 +98,7 @@ jobs:
                   set -euo pipefail
 
                   temporary_directory="$(mktemp -d)"
-                  trap 'sudo dpkg -r nadi-provision-helper >/dev/null 2>&1 || true; rm -rf "$temporary_directory"' EXIT
+                  trap 'sudo rm -f /etc/sudoers.d/nadi-provision-ci; sudo userdel nadi-bootstrap-ci >/dev/null 2>&1 || true; sudo dpkg -r nadi-provision-helper >/dev/null 2>&1 || true; rm -rf "$temporary_directory"' EXIT
 
                   openssl genpkey -algorithm ED25519 -out "$temporary_directory/test-signing-private.pem"
                   openssl pkey -in "$temporary_directory/test-signing-private.pem" -pubout -out "$temporary_directory/test-signing-public.pem"
@@ -167,10 +167,21 @@ jobs:
                       exit 1
                   fi
 
-                  sudoers_file="$temporary_directory/nadi-provision"
-                  printf '%s\n' 'nadi-test-installer ALL=(root) NOPASSWD: /usr/libexec/nadi/nadi-provision --request-stdin' > "$sudoers_file"
+                  sudo useradd --system --no-create-home --shell /usr/sbin/nologin nadi-bootstrap-ci
+                  sudoers_file="/etc/sudoers.d/nadi-provision-ci"
+                  printf '%s\n' 'nadi-bootstrap-ci ALL=(root) NOPASSWD: /usr/libexec/nadi/nadi-provision --request-stdin' | sudo tee "$sudoers_file" >/dev/null
                   sudo chown root:root "$sudoers_file"
                   sudo chmod 0440 "$sudoers_file"
                   sudo visudo -cf "$sudoers_file"
 
+                  if printf '%s' '{"protocol_version":999,"operation":"start_agent"}' | sudo -u nadi-bootstrap-ci /usr/bin/sudo -n -- /usr/libexec/nadi/nadi-provision --request-stdin > "$temporary_directory/helper-response.json" 2> "$temporary_directory/helper-error.txt"; then
+                      printf 'The helper unexpectedly accepted an invalid protocol version.\n' >&2
+                      exit 1
+                  fi
+
+                  grep -F '"phase":"request_validation"' "$temporary_directory/helper-response.json"
+                  grep -F '"success":false' "$temporary_directory/helper-response.json"
+
+                  sudo rm -f "$sudoers_file"
+                  sudo userdel nadi-bootstrap-ci
                   sudo dpkg -r nadi-provision-helper

@@ -129,7 +129,7 @@ An uncertain enrollment result remains non-retryable until reconciled. The helpe
 
 ## Validation
 
-The Agent CI builds AMD64 and ARM64 bootstrap packages from the corresponding Agent binary, verifies package metadata and exact contents for both, rejects all maintainer scripts, installs the native AMD64 package on an Ubuntu runner, and checks the installed helper is root:root mode 0755 before removing the test package.
+The Agent CI builds AMD64 and ARM64 bootstrap packages from the corresponding Agent binary, verifies package metadata and exact contents for both, rejects all maintainer scripts, installs the native AMD64 package on an Ubuntu runner, checks root:root mode 0755, validates the exact sudoers rule with visudo, and invokes the helper as a non-root test account through that exact sudo rule using an invalid protocol request that must fail before provisioning.
 
 The CI package is a validation artifact, not a production release. Production release remains blocked until:
 
