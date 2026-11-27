@@ -147,7 +147,7 @@ func TestInstallBridgeApplicationConfigurationsJournaledAtVerifiesAndRollsBack(t
 	centralSourceIPs := []string{"203.0.113.10"}
 	store, journal, err := newProvisionJournalForOperation(
 		filepath.Join(root, "journal.json"),
-		"enroll_agent",
+		"restore_agent",
 	)
 	if err != nil {
 		t.Fatalf("create enrollment journal: %v", err)
