@@ -179,7 +179,6 @@ func TestAppendNginxErrorLogsPersistsServerScopedEvent(t *testing.T) {
 	}
 }
 
-
 func TestConcurrentAppendCannotExceedConfiguredCapacity(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "spool"), 1024*1024, 1)
 	if err != nil {

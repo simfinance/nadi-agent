@@ -90,7 +90,6 @@ func TestApplicationSpoolAcknowledgesOnlyMatchingApplicationEvents(t *testing.T)
 	}
 }
 
-
 func TestConcurrentAppendCannotExceedApplicationCapacity(t *testing.T) {
 	store, err := Open(t.TempDir(), 1024*1024, 1)
 	if err != nil {
