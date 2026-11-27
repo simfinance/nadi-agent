@@ -127,26 +127,26 @@ jobs:
                       grep -F 'Release public key fingerprint does not match' "$temporary_directory/verify-error.txt"
 
                       trusted_public_key="$GITHUB_WORKSPACE/release/public-keys/release-signing-public.pem"
-                      ln -s "$temporary_directory/test-signing-public.pem" "$temporary_directory/symlink-public.pem"
-                      ln -s "$package_path" "$temporary_directory/symlink-package.deb"
-                      ln -s "$package_path.sig" "$temporary_directory/symlink-signature.sig"
+                      ln -s "$temporary_directory/test-signing-public.pem" "$temporary_directory/symlink-public-$architecture.pem"
+                      ln -s "$package_path" "$temporary_directory/symlink-package-$architecture.deb"
+                      ln -s "$package_path.sig" "$temporary_directory/symlink-signature-$architecture.sig"
 
                       for input_case in public-key package signature; do
                           case "$input_case" in
                               public-key)
-                                  verifier_public_key="$temporary_directory/symlink-public.pem"
+                                  verifier_public_key="$temporary_directory/symlink-public-$architecture.pem"
                                   verifier_package="$package_path"
                                   verifier_signature="$package_path.sig"
                                   ;;
                               package)
                                   verifier_public_key="$trusted_public_key"
-                                  verifier_package="$temporary_directory/symlink-package.deb"
+                                  verifier_package="$temporary_directory/symlink-package-$architecture.deb"
                                   verifier_signature="$package_path.sig"
                                   ;;
                               signature)
                                   verifier_public_key="$trusted_public_key"
                                   verifier_package="$package_path"
-                                  verifier_signature="$temporary_directory/symlink-signature.sig"
+                                  verifier_signature="$temporary_directory/symlink-signature-$architecture.sig"
                                   ;;
                           esac
 
