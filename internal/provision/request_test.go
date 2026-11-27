@@ -123,7 +123,6 @@ func validInstallOperationRequest() ProvisionOperationRequest {
 	}
 }
 
-
 func TestValidateInstallOperationRejectsDuplicateRuntimeGID(t *testing.T) {
 	request := validInstallOperationRequest()
 	request.Applications[1].RuntimeGID = request.Applications[0].RuntimeGID

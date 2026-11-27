@@ -18,10 +18,10 @@ import (
 )
 
 const (
-	bridgeApplicationConfigDirectory     = "/var/lib/nadi-bridge/config"
+	bridgeApplicationConfigDirectory                 = "/var/lib/nadi-bridge/config"
 	bridgeApplicationConfigDirectoryMode os.FileMode = 0711
 	bridgeApplicationConfigFileMode      os.FileMode = 0640
-	maximumCentralSourceIPs              = 16
+	maximumCentralSourceIPs                          = 16
 )
 
 type bridgeApplicationConfiguration struct {

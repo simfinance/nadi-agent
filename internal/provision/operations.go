@@ -42,7 +42,7 @@ type provisionInventory struct {
 	ProtocolVersion  int                    `json:"protocol_version"`
 	AgentVersion     string                 `json:"agent_version"`
 	ArtifactSHA256   string                 `json:"artifact_sha256"`
-	Applications    []ProvisionApplication `json:"applications"`
+	Applications     []ProvisionApplication `json:"applications"`
 	CentralSourceIPs []string               `json:"central_source_ips"`
 }
 
@@ -452,8 +452,8 @@ func runInstallAgentOperation(request ProvisionOperationRequest, response Helper
 	}
 
 	inventory := provisionInventory{
-		ProtocolVersion: 1,
-		AgentVersion:    releaseManifest.Version,
+		ProtocolVersion:  1,
+		AgentVersion:     releaseManifest.Version,
 		ArtifactSHA256:   artifact.SHA256,
 		Applications:     request.Applications,
 		CentralSourceIPs: request.CentralSourceIPs,
