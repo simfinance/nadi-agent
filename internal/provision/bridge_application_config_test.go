@@ -141,7 +141,6 @@ func TestBuildBridgeApplicationConfigurationsRejectsCIDRAllowlist(t *testing.T) 
 	}
 }
 
-
 func TestInstallBridgeApplicationConfigurationsJournaledAtVerifiesAndRollsBack(t *testing.T) {
 	root := t.TempDir()
 	config := testBridgeApplicationConfiguration()
