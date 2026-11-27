@@ -91,3 +91,38 @@ jobs:
                   GOOS: linux
                   GOARCH: arm64
               run: go build ./...
+
+            - name: Build and install Debian helper bootstrap packages
+              shell: bash
+              run: |
+                  set -euo pipefail
+
+                  temporary_directory="$(mktemp -d)"
+                  trap 'sudo dpkg -r nadi-provision-helper >/dev/null 2>&1 || true; rm -rf "$temporary_directory"' EXIT
+
+                  for architecture in amd64 arm64; do
+                      binary_path="$temporary_directory/nadi-agent-$architecture"
+                      package_path="$temporary_directory/nadi-provision-helper_0.7.5_$architecture.deb"
+
+                      GOOS=linux GOARCH="$architecture" CGO_ENABLED=0 go build -o "$binary_path" ./cmd/nadi-agent
+                      digest="$(sha256sum "$binary_path" | awk '{print $1}')"
+
+                      scripts/build-helper-deb.sh \
+                          "$binary_path" \
+                          "0.7.5" \
+                          "$architecture" \
+                          "$digest" \
+                          "$package_path"
+
+                      scripts/test-helper-deb.sh "$package_path" "0.7.5" "$architecture"
+
+                      sudo dpkg -i "$package_path"
+
+                      installed_metadata="$(stat -c '%u:%g:%a' /usr/libexec/nadi/nadi-provision)"
+                      if [ "$installed_metadata" != "0:0:755" ]; then
+                          printf 'Installed helper metadata is invalid: %s\\n' "$installed_metadata" >&2
+                          exit 1
+                      fi
+
+                      sudo dpkg -r nadi-provision-helper
+                  done

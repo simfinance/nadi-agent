@@ -1,6 +1,6 @@
 # Trusted Provisioning Helper Bootstrap Boundary
 
-Status: partial implementation. This document does not authorize production installation or sudoers deployment.
+Status: Debian bootstrap package source and CI installation checks are implemented. Production package signing/publication and supported-host integration remain release gates.
 
 ## Fixed executable contract
 
@@ -18,20 +18,53 @@ nadi-provision --request-stdin
 
 The request remains JSON on standard input. The helper does not accept an operation name, command path, service name, destination path, or arbitrary filesystem target through argv.
 
+## Trust model and first-install bootstrap
+
+The deployment user cannot install a root-owned executable by itself, and Composer must not cross that privilege boundary. Therefore, the first helper installation is performed by the server administrator through the trusted Ubuntu OS package channel before the deployment user runs Artisan.
+
+The bootstrap package is named `nadi-provision-helper`. It is an architecture-specific Debian package containing exactly one file:
+
+- `/usr/libexec/nadi/nadi-provision`
+
+The package contains no maintainer scripts, service units, configuration files, credentials, or additional executables. Its helper file is root:root mode 0755. Package construction uses `dpkg-deb --root-owner-group` and validates the source Agent binary against the SHA-256 digest supplied by the signed release manifest.
+
+The release process must produce a detached Ed25519 signature over the complete `.deb` package using the existing NADI Agent release signing key. The server administrator must obtain the public key through the established trusted distribution channel and verify its pinned fingerprint before use:
+
+```text
+91d063a323ffb7feaad3e4bf39d750ec339b2206b74f762d11e1f291267a49e1
+```
+
+Verify the package signature before installation:
+
+```bash
+scripts/verify-helper-package-signature.sh \
+    /path/to/trusted-release-signing-public.pem \
+    nadi-provision-helper_VERSION_ARCH.deb \
+    nadi-provision-helper_VERSION_ARCH.deb.sig
+```
+
+After successful verification, the server administrator installs the package through the OS package manager:
+
+```bash
+sudo dpkg -i nadi-provision-helper_VERSION_ARCH.deb
+```
+
+The package has no pre-install, post-install, pre-remove, or post-remove scripts. It only places the already signed helper executable at its fixed root-owned path. This bootstrap step is administrator-managed OS provisioning, not Composer execution and not a monitoring collector installation.
+
+The package must be updated to the exact Agent release version before running an Agent update. The helper's journaled asset installer rejects a conflicting existing helper binary; it does not silently replace an independently installed package-owned helper.
+
 ## One signed binary for Agent and helper
 
-The helper entrypoint is now a second invocation mode of the same `cmd/nadi-agent` executable that is verified by the existing Ed25519 release manifest.
+The helper entrypoint is a second invocation mode of the same `cmd/nadi-agent` executable verified by the existing Ed25519 release manifest.
 
-The installer design is to install the verified artifact at both fixed destinations:
+The installer installs the verified artifact at:
 
 - `/opt/nadi/bin/nadi-agent`
 - `/usr/libexec/nadi/nadi-provision`
 
-The second file must be copied byte-for-byte from the already verified staged artifact. The helper is not built as an independently trusted executable and must not be sourced from an unsigned secondary build output.
+The second file must be byte-for-byte identical to the verified artifact. The Debian bootstrap package uses that same binary and must be built from the same release output. The helper is not an independently trusted executable or unsigned secondary build.
 
-The executable selects helper mode only when invoked with the `nadi-provision` basename. It then validates its resolved executable path against the fixed helper path before reading or dispatching the request. Invoking the same binary under the Agent name continues to use the normal Agent CLI.
-
-This reuses the existing signed Agent artifact contract without changing the release manifest schema or inventing a second signing key. The root-owned `install_agent` transaction now stages the same verified artifact at both destinations through its journaled immutable-file installer. Both copies are root:root mode 0755, and the helper destination is covered by the install rollback roots. Recovery verification checks that both installed binaries still match the signed artifact digest. This is source-level implementation only; no host installation or privileged integration test has been performed.
+The executable selects helper mode only when invoked with the `nadi-provision` basename. It validates its resolved executable path against the fixed helper path before reading or dispatching the request. Invoking the same binary under the Agent name continues to use the normal Agent CLI.
 
 ## Runtime self-validation
 
@@ -45,23 +78,57 @@ Before dispatching a privileged request, the executable validates its own resolv
 - an executable without execute permission;
 - setuid or setgid bits on the helper executable.
 
-The helper reuses the trusted command path validator for the parent-directory chain. The check is an additional runtime guard; it does not install the helper or establish the trustworthiness of a package source.
+The helper reuses the trusted command path validator for the parent-directory chain. The check is an additional runtime guard; package authenticity is established by the detached signature verified by the administrator before installation.
 
-## What remains intentionally unimplemented
+## Deployment-user invocation and sudoers
 
-- No customer-facing package or production release currently ships the helper at the fixed path.
-- The Agent-side `install_agent` implementation copies the verified artifact byte-for-byte to the helper destination, but this has not been validated on a disposable Ubuntu host.
-- No Composer script installs, replaces, or invokes the root-owned helper.
-- No sudoers file is generated or installed.
-- The approved installer caller is either `root` directly or a verified deployment/administrator Unix account with sudo authorization.
-- A root caller invokes the fixed helper directly and does not require sudoers.
-- A non-root caller invokes the helper only through `/usr/bin/sudo -n -- /usr/libexec/nadi/nadi-provision --request-stdin`; its account must have a narrow, root-owned, mode-0440 sudoers rule for that exact command, validated with `visudo -cf`.
-- The Composer package never requests, stores, or forwards a sudo password. Interactive sudo prompting is not supported.
-- The PHP-FPM runtime identity remains separate from the installer caller and from the `nadi-agent` service identity.
-- No privileged-host installation or systemd integration test is claimed.
+Laravel, Composer, Artisan, service providers, and package-owned writable files must run as the application deployment user, never as root. In particular, do not run `composer require` or `php artisan nadi:install` with `sudo` or from a root shell.
 
-The helper must not be exposed through a wildcard sudoers rule, a caller-selected executable, or a broad command alias. A future package must install both copies from the same verified release artifact, preserve the fixed path and permissions, and be verified independently of Composer.
+The deployment user invokes the fixed helper only through:
 
-## Validation scope
+```text
+/usr/bin/sudo -n -- /usr/libexec/nadi/nadi-provision --request-stdin
+```
 
-Unit tests cover helper argument dispatch and executable path validation with temporary fixtures. The standard Go CI workflow must still pass for the implementation commit. These tests do not replace package installation tests, sudo authorization tests, root/non-root integration tests, or disposable Ubuntu end-to-end tests.
+The server administrator must create a sudoers entry for the exact Unix account that runs `php artisan nadi:install`:
+
+```sudoers
+<installer-user> ALL=(root) NOPASSWD: /usr/libexec/nadi/nadi-provision --request-stdin
+```
+
+Replace `<installer-user>` with the verified deployment account. The sudoers file must be root-owned, mode 0440, and validated with `visudo -cf`. Do not grant a wildcard, shell, general root command, arbitrary executable argument, or package-manager command through sudoers.
+
+The Bridge rejects UID 0 before downloading the Agent release or invoking the helper. The package never requests, stores, or forwards a sudo password. Interactive sudo prompting is not supported. The PHP-FPM runtime identity remains separate from the installer caller and from the `nadi-agent` service identity.
+
+## Fixed helper protocol
+
+The helper accepts only:
+
+```bash
+nadi-provision --request-stdin
+```
+
+The request is one bounded JSON document on standard input. The helper rejects unknown fields, unknown operations, duplicate JSON keys, trailing JSON values, oversized input, and unsupported protocol versions.
+
+Protocol version 1 exposes three operation-specific request envelopes:
+
+- `install_agent`: verify and install only; no enrollment token.
+- `enroll_agent`: one complete application manifest and one-time token on standard input; enrollment runs as `nadi-agent`.
+- `start_agent`: enable/start only the fixed NADI units after verifying registration and broker completion.
+
+An uncertain enrollment result remains non-retryable until reconciled. The helper never accepts caller-selected commands, units, users, groups, filesystem destinations, or permissions.
+
+## Validation
+
+The Agent CI builds AMD64 and ARM64 bootstrap packages from the corresponding Agent binary, verifies package metadata and exact contents, rejects all maintainer scripts, installs each package on an Ubuntu runner, and checks the installed helper is root:root mode 0755 before removing the test package.
+
+The CI package is a validation artifact, not a production release. Production release remains blocked until:
+
+- the release process signs each package with the trusted Ed25519 release key;
+- the detached signature and public-key distribution are independently verified;
+- the signed packages are published through the approved distribution channel;
+- the exact sudoers rule is validated with `visudo -cf`;
+- root/non-root and systemd integration tests pass on supported disposable Ubuntu hosts;
+- the complete Composer, Artisan, helper, Agent, Broker, Bridge, Central enrollment, approval, Activation Grant and acknowledgement flow passes end-to-end.
+
+No production host, Central service, customer application configuration, firewall, or monitoring activation is modified by these package build tests.
