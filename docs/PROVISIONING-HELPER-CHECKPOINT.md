@@ -1,6 +1,6 @@
 # Root-Owned Provisioning Helper Checkpoint
 
-Status: implementation in progress. The root-owned helper is not implemented or production-ready.
+Status: source implementation available; production release and supported-host integration remain blocked by the release gates recorded below.
 
 
 
