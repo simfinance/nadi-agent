@@ -2,6 +2,10 @@
 
 Status: implementation in progress. The root-owned helper is not implemented or production-ready.
 
+
+
+> **Status terkini — 27 November 2026:** Implementasi source root-owned provisioning helper, RESTORE, recovery journal, bootstrap package Debian, dan release signer telah tersedia pada branch Agent. Pernyataan historis di bawah yang menyebut helper belum diimplementasikan harus dibaca sebagai checkpoint lama, bukan status source saat ini. Helper belum dinyatakan production-ready: paket produksi belum ditandatangani dengan private key rilis NADI, distribusi tepercaya belum dibuktikan, dan pengujian host Ubuntu/systemd serta integrasi end-to-end masih menjadi release gate.
+
 ## Confirmed Central enrollment model
 
 The NADI Central `main` source was inspected directly:
@@ -423,3 +427,25 @@ This increment only hardens fixed OS command execution inside the Agent provisio
 The implementation is in `cmd/nadi-agent/provision_helper.go`, `internal/provision/helper.go`, `internal/provision/journal_integration.go`, and `internal/provision/operations.go`, with corresponding tests. The signed release manifest schema and trusted release key were not changed.
 
 CI status at this checkpoint: workflow #45743235640 passed the previous helper-validator fixture correction. Workflow #45744162005 encountered a formatting-job push race while concurrent Agent commits were being added; the workflow bot subsequently committed the single gofmt cleanup as `da3765a619095589729598cf8cfed9cacb14847b`. Its follow-up workflow #45744256006 is marked `action_required`, so the latest single-artifact helper installation changes still require a fresh successful validation run.
+
+
+## Trusted helper package signing and CI validation — 27 November 2026
+
+- [x] Added `scripts/sign-helper-package.sh` to sign the complete Debian bootstrap package with the pinned NADI Ed25519 release key.
+- [x] The signer accepts only a regular, non-symlink private-key file with mode `0400` or `0600`, and rejects a key whose derived public-key fingerprint differs from the pinned trust anchor.
+- [x] Before signing, the signer verifies the signed Agent release manifest, selects the requested architecture, validates the binary digest, checks package name/version/architecture, validates the package file list and root-owned helper mode, and confirms that the packaged helper bytes exactly match the signed Agent binary.
+- [x] The detached package signature is verified before publication and moved atomically to a previously unused output path.
+- [x] Added `scripts/verify-helper-package-signature.sh`; the verifier independently enforces the pinned public-key fingerprint before checking the detached Ed25519 signature.
+- [x] CI now invokes the signer explicitly through `bash`, avoiding dependence on the executable bit in the checkout.
+- [x] Agent workflow #521 (run ID `45929965062`) completed successfully on commit `36e7830e3d2d8a6c4c4d055330ebdcce42c2f0d3`. Both `format` and `validate` jobs succeeded. Validation included Go formatting, unit tests, race tests, vet, Linux AMD64/ARM64 builds, Debian helper package construction and inspection, native package installation, sudoers syntax validation, and a non-root invocation of the installed helper with an intentionally invalid request.
+- [x] The CI signing test uses an ephemeral untrusted key and confirms that the production signer/verifier reject it. It does not use or disclose the NADI production private key.
+
+### Remaining release gates
+
+- [ ] An authorized release operator must sign the actual AMD64 and ARM64 bootstrap packages using the protected NADI release private key. The private key is not present in the repository and must not be committed, pasted into chat, or substituted with a test key.
+- [ ] Publish the package, detached signature, and public trust anchor through an approved trusted distribution channel.
+- [ ] Verify package signatures and exact installed ownership/modes on supported disposable Ubuntu hosts.
+- [ ] Complete root/non-root and systemd lifecycle, rollback fault-injection, and reboot-recovery tests on disposable hosts.
+- [ ] Complete the separate Composer/Artisan, Bridge, Agent, Broker, enrollment, approval, Activation Grant, and acknowledgement integration test. Monitoring must remain gated until the valid grant and acknowledgement conditions are satisfied.
+
+PR #2 remains Open and Draft. Workflow #521 establishes source/CI validation only; it does not establish production signing, production installation, or end-to-end readiness. No Central repository, production host, or monitoring activation was changed by this checkpoint.
