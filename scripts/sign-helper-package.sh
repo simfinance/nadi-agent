@@ -23,6 +23,12 @@ for path in "$private_key" "$package_path" "$manifest_path" "$manifest_signature
     fi
 done
 
+private_key="$(realpath -e -- "$private_key")"
+package_path="$(realpath -e -- "$package_path")"
+manifest_path="$(realpath -e -- "$manifest_path")"
+manifest_signature_path="$(realpath -e -- "$manifest_signature_path")"
+agent_binary="$(realpath -e -- "$agent_binary")"
+
 private_key_mode="$(stat -c '%a' "$private_key")"
 
 case "$private_key_mode" in
