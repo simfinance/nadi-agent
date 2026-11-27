@@ -210,6 +210,13 @@ func (a *App) runControlPoll(ctx context.Context, store *state.Store, agentState
 			"commands_received", len(pollData.Commands),
 		)
 
+		if len(pollData.Commands) > 0 {
+			if err := a.acceptCommands(ctx, store, pollData.Commands); err != nil {
+				a.logger.Error("Central commands could not be durably accepted or acknowledged", "error", err)
+			}
+		}
+
+
 		currentState, loadErr = store.Load()
 		if loadErr != nil {
 			a.logger.Error("Unable to reload local state before Activation Grant processing", "error", loadErr)
@@ -240,11 +247,6 @@ func (a *App) runControlPoll(ctx context.Context, store *state.Store, agentState
 			}
 		}
 
-		if len(pollData.Commands) > 0 {
-			if err := a.acceptCommands(ctx, store, pollData.Commands); err != nil {
-				a.logger.Error("Central commands could not be durably accepted or acknowledged", "error", err)
-			}
-		}
 
 		if !wait(ctx, a.config.PollInterval) {
 			break
