@@ -205,10 +205,10 @@ func sameReceivedCommand(
 }
 
 func commandInboxSize(commands []state.ReceivedCommand) int {
-    total := 0
-    for _, command := range commands {
-        total += len(command.Payload)
+    content, err := json.Marshal(commands)
+    if err != nil {
+        return maximumCommandInboxSize + 1
     }
 
-    return total
+    return len(content)
 }
