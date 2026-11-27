@@ -629,7 +629,7 @@ func (s *Sender) appendQuarantine(entry QuarantineEntry) error {
 		file.Close()
 		return fmt.Errorf("secure telemetry quarantine file: %w", err)
 	}
-	if _, err := file.Write(content); err != nil {
+	if err := writeAll(file, content); err != nil {
 		file.Close()
 		return fmt.Errorf("write telemetry quarantine entry: %w", err)
 	}
@@ -926,7 +926,7 @@ func (s *Sender) writeJSON(name string, value any) error {
 		temporary.Close()
 		return err
 	}
-	if _, err := temporary.Write(content); err != nil {
+	if err := writeAll(temporary, content); err != nil {
 		temporary.Close()
 		return err
 	}
@@ -961,4 +961,20 @@ func newUUID() (string, error) {
 	value[8] = (value[8] & 0x3f) | 0x80
 	encoded := hex.EncodeToString(value[:])
 	return encoded[0:8] + "-" + encoded[8:12] + "-" + encoded[12:16] + "-" + encoded[16:20] + "-" + encoded[20:32], nil
+}
+
+
+func writeAll(writer io.Writer, content []byte) error {
+	for len(content) > 0 {
+		written, err := writer.Write(content)
+		if err != nil {
+			return err
+		}
+		if written <= 0 {
+			return io.ErrShortWrite
+		}
+		content = content[written:]
+	}
+
+	return nil
 }

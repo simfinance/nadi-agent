@@ -1045,3 +1045,37 @@ func TestSenderConcurrentPendingInspectionAndCompletionIsRaceSafe(t *testing.T) 
 		t.Fatalf("complete pending batch: %v", err)
 	}
 }
+
+
+type shortWriter struct {
+	maximumWrite int
+	content      []byte
+}
+
+func (w *shortWriter) Write(content []byte) (int, error) {
+	if len(content) > w.maximumWrite {
+		content = content[:w.maximumWrite]
+	}
+	w.content = append(w.content, content...)
+	return len(content), nil
+}
+
+func TestWriteAllCompletesPartialWrites(t *testing.T) {
+	writer := &shortWriter{maximumWrite: 3}
+	expected := []byte("durable telemetry state")
+
+	if err := writeAll(writer, expected); err != nil {
+		t.Fatalf("write all content: %v", err)
+	}
+	if !bytes.Equal(writer.content, expected) {
+		t.Fatalf("written content mismatch: got %q want %q", writer.content, expected)
+	}
+}
+
+func TestWriteAllRejectsWriterWithoutProgress(t *testing.T) {
+	writer := &shortWriter{maximumWrite: 0}
+
+	if err := writeAll(writer, []byte("telemetry")); !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("expected io.ErrShortWrite, got %v", err)
+	}
+}
