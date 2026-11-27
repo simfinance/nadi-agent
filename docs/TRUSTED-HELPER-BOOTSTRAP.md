@@ -41,7 +41,7 @@ scripts/sign-helper-package.sh \
     nadi-provision-helper_VERSION_ARCH.deb.sig
 ``
 
-The signer uses ``go run ./cmd/nadi-release-verifier`` and the embedded NADI release trust anchor. A checksum supplied independently by a caller is not sufficient authorization to sign a bootstrap package.
+The signer uses `go run ./cmd/nadi-release-verifier` and the embedded NADI release trust anchor. A checksum supplied independently by a caller is not sufficient authorization to sign a bootstrap package.
 
 ```bash
 scripts/sign-helper-package.sh \\
