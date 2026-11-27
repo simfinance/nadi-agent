@@ -688,7 +688,7 @@ func (s *Sender) quarantinedSourcesOrAdvance(pending *pendingBatch, statusCode i
 		updated.Following,
 	)
 	if len(sources) == 0 && len(updated.Following) > 0 {
-		if err := s.Complete(); err != nil {
+		if err := s.completePending(); err != nil {
 			return nil, fmt.Errorf("advance quarantined split batch: %w", err)
 		}
 		if statusCode == http.StatusGone {
