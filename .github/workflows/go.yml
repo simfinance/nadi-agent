@@ -167,4 +167,10 @@ jobs:
                       exit 1
                   fi
 
+                  sudoers_file="$temporary_directory/nadi-provision"
+                  printf '%s\\n' 'nadi-test-installer ALL=(root) NOPASSWD: /usr/libexec/nadi/nadi-provision --request-stdin' > "$sudoers_file"
+                  sudo chown root:root "$sudoers_file"
+                  sudo chmod 0440 "$sudoers_file"
+                  sudo visudo -cf "$sudoers_file"
+
                   sudo dpkg -r nadi-provision-helper
