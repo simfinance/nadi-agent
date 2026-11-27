@@ -27,6 +27,21 @@ The current development build adds a Central JSON telemetry batch sender, persis
 
 The provisioning helper supports Ubuntu Linux on AMD64 and ARM64 with systemd. One Agent is installed per server and can manage multiple Laravel applications with per-application isolation. The supported platform and Laravel compatibility boundaries are documented in `docs/SUPPORTED-PLATFORMS.md`. The current simpiav2 script is a pilot-specific path, not the generic installation contract.
 
+## Trusted installer bootstrap
+
+The Laravel package and Artisan command must run as the non-root application deployment user. Never run Composer or `php artisan nadi:install` through sudo or from a root shell.
+
+Before the first Artisan installation, the server administrator must provision the signed, architecture-specific `nadi-provision-helper` Debian package through the trusted Ubuntu OS package channel, verify its detached Ed25519 signature against the pinned NADI release trust anchor, and install the exact helper at `/usr/libexec/nadi/nadi-provision`. The administrator must also authorize only the exact helper invocation for the deployment user through a root-owned mode-0440 sudoers rule validated with `visudo -cf`. See `docs/TRUSTED-HELPER-BOOTSTRAP.md` for the package contract and verification steps.
+
+After that host prerequisite is provisioned, the application deployment user runs:
+
+```bash
+composer require nadi/laravel-agent
+php artisan nadi:install
+```
+
+The Composer package never installs, replaces, or bootstraps the root-owned helper. The Debian package contains only the fixed helper executable and no maintainer scripts. Package source and CI checks are present, but the production package has not yet been signed and published with the protected release key; the installer is not production-ready.
+
 ## Requirements
 
 - Go 1.23 or newer to build from source
