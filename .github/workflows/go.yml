@@ -126,6 +126,44 @@ jobs:
                       fi
                       grep -F 'Release public key fingerprint does not match' "$temporary_directory/verify-error.txt"
 
+                      trusted_public_key="$GITHUB_WORKSPACE/release/public-keys/release-signing-public.pem"
+                      ln -s "$temporary_directory/test-signing-public.pem" "$temporary_directory/symlink-public.pem"
+                      ln -s "$package_path" "$temporary_directory/symlink-package.deb"
+                      ln -s "$package_path.sig" "$temporary_directory/symlink-signature.sig"
+
+                      for input_case in public-key package signature; do
+                          case "$input_case" in
+                              public-key)
+                                  verifier_public_key="$temporary_directory/symlink-public.pem"
+                                  verifier_package="$package_path"
+                                  verifier_signature="$package_path.sig"
+                                  ;;
+                              package)
+                                  verifier_public_key="$trusted_public_key"
+                                  verifier_package="$temporary_directory/symlink-package.deb"
+                                  verifier_signature="$package_path.sig"
+                                  ;;
+                              signature)
+                                  verifier_public_key="$trusted_public_key"
+                                  verifier_package="$package_path"
+                                  verifier_signature="$temporary_directory/symlink-signature.sig"
+                                  ;;
+                          esac
+
+                          if scripts/verify-helper-package-signature.sh \\
+                              "$verifier_public_key" \\
+                              "$verifier_package" \\
+                              "$verifier_signature" 2>"$temporary_directory/verify-symlink-error.txt"; then
+                              printf 'Verifier accepted a symlinked %s input.\\n' "$input_case" >&2
+                              exit 1
+                          fi
+                          if ! grep -Fq 'regular non-symlink files' "$temporary_directory/verify-symlink-error.txt"; then
+                              printf 'Verifier did not reject the symlinked %s input as expected. Diagnostic follows:\\n' "$input_case" >&2
+                              cat "$temporary_directory/verify-symlink-error.txt" >&2
+                              exit 1
+                          fi
+                      done
+
                       if bash scripts/sign-helper-package.sh \
                           "$temporary_directory/test-signing-private.pem" \
                           "$package_path" \
