@@ -54,12 +54,29 @@ type provisionAsset struct {
 }
 
 func agentInstallationAssets(artifact []byte) []provisionAsset {
+	return agentInstallationAssetsAt(string(os.PathSeparator), artifact, 0, 0)
+}
+
+func agentInstallationAssetsAt(
+	root string,
+	artifact []byte,
+	ownerUID int,
+	ownerGID int,
+) []provisionAsset {
+	targetPath := func(path string) string {
+		if root == string(os.PathSeparator) {
+			return path
+		}
+
+		return filepath.Join(root, strings.TrimPrefix(path, string(os.PathSeparator)))
+	}
+
 	return []provisionAsset{
-		{path: agentBinaryPath, content: artifact, mode: 0755, uid: 0, gid: 0},
-		{path: trustedProvisionHelperPath, content: artifact, mode: 0755, uid: 0, gid: 0},
-		{path: activationPublicKeyPath, content: helperActivationPublicKey, mode: 0644, uid: 0, gid: 0},
-		{path: agentUnitPath, content: helperAgentUnit, mode: 0644, uid: 0, gid: 0},
-		{path: brokerUnitPath, content: helperBrokerUnit, mode: 0644, uid: 0, gid: 0},
+		{path: targetPath(agentBinaryPath), content: artifact, mode: 0755, uid: ownerUID, gid: ownerGID},
+		{path: targetPath(trustedProvisionHelperPath), content: artifact, mode: 0755, uid: ownerUID, gid: ownerGID},
+		{path: targetPath(activationPublicKeyPath), content: helperActivationPublicKey, mode: 0644, uid: ownerUID, gid: ownerGID},
+		{path: targetPath(agentUnitPath), content: helperAgentUnit, mode: 0644, uid: ownerUID, gid: ownerGID},
+		{path: targetPath(brokerUnitPath), content: helperBrokerUnit, mode: 0644, uid: ownerUID, gid: ownerGID},
 	}
 }
 

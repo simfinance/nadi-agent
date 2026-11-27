@@ -325,6 +325,30 @@ func installAgentAssetsJournaled(
 	store *provisionJournalStore,
 	journal *provisionJournal,
 ) error {
+	return installAgentAssetsJournaledAt(
+		string(os.PathSeparator),
+		artifactPath,
+		expectedDigest,
+		0,
+		0,
+		store,
+		journal,
+	)
+}
+
+func installAgentAssetsJournaledAt(
+	root string,
+	artifactPath string,
+	expectedDigest string,
+	ownerUID int,
+	ownerGID int,
+	store *provisionJournalStore,
+	journal *provisionJournal,
+) error {
+	if !filepath.IsAbs(root) || filepath.Clean(root) != root {
+		return errors.New("Agent asset installation root must be absolute and canonical")
+	}
+
 	artifact, err := os.ReadFile(artifactPath)
 	if err != nil {
 		return fmt.Errorf("read verified Agent artifact: %w", err)
@@ -338,7 +362,9 @@ func installAgentAssetsJournaled(
 		return errors.New("Agent artifact changed after signature and checksum verification")
 	}
 
-	return installProvisionAssetsJournaled(agentInstallationAssets(artifact), store, journal)
+	assets := agentInstallationAssetsAt(root, artifact, ownerUID, ownerGID)
+
+	return installProvisionAssetsJournaled(assets, store, journal)
 }
 
 func installProvisionAssetsJournaled(
