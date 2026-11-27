@@ -158,7 +158,7 @@ jobs:
                       fi
                       grep -F 'Release public key fingerprint does not match' "$temporary_directory/verify-error.txt"
 
-                      if scripts/sign-helper-package.sh \
+                      if bash scripts/sign-helper-package.sh \
                           "$temporary_directory/test-signing-private.pem" \
                           "$package_path" \
                           "$temporary_directory/invalid-manifest.json" \
