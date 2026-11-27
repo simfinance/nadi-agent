@@ -218,6 +218,13 @@ func validateProvisionJournalParent(path string, ownerUID uint32, ownerGID uint3
 }
 
 func (s *provisionJournalStore) Save(journal provisionJournal) error {
+	return s.saveWithOperations(journal, defaultProvisionAtomicFileOperations())
+}
+
+func (s *provisionJournalStore) saveWithOperations(
+	journal provisionJournal,
+	operations provisionAtomicFileOperations,
+) error {
 	if err := validateProvisionJournal(journal); err != nil {
 		return err
 	}
@@ -248,33 +255,37 @@ func (s *provisionJournalStore) Save(journal provisionJournal) error {
 	}
 
 	directory := filepath.Dir(s.path)
-	temporary, err := os.CreateTemp(directory, ".nadi-provision-journal-*")
+	temporary, err := operations.createTemp(directory, ".nadi-provision-journal-*")
 	if err != nil {
 		return fmt.Errorf("create temporary provisioning journal: %w", err)
 	}
 
 	temporaryPath := temporary.Name()
 	cleanup := func() {
-		_ = os.Remove(temporaryPath)
+		_ = operations.remove(temporaryPath)
 	}
 
 	if err := temporary.Chmod(0600); err != nil {
-		temporary.Close()
+		_ = temporary.Close()
 		cleanup()
 		return fmt.Errorf("set provisioning journal permissions: %w", err)
 	}
 	if err := temporary.Chown(int(s.ownerUID), int(s.ownerGID)); err != nil {
-		temporary.Close()
+		_ = temporary.Close()
 		cleanup()
 		return fmt.Errorf("set provisioning journal ownership: %w", err)
 	}
-	if _, err := temporary.Write(content); err != nil {
-		temporary.Close()
+	written, writeErr := temporary.Write(content)
+	if writeErr == nil && written != len(content) {
+		writeErr = io.ErrShortWrite
+	}
+	if writeErr != nil {
+		_ = temporary.Close()
 		cleanup()
-		return fmt.Errorf("write provisioning journal: %w", err)
+		return fmt.Errorf("write provisioning journal: %w", writeErr)
 	}
 	if err := temporary.Sync(); err != nil {
-		temporary.Close()
+		_ = temporary.Close()
 		cleanup()
 		return fmt.Errorf("sync provisioning journal: %w", err)
 	}
@@ -283,12 +294,12 @@ func (s *provisionJournalStore) Save(journal provisionJournal) error {
 		return fmt.Errorf("close provisioning journal: %w", err)
 	}
 
-	if err := os.Rename(temporaryPath, s.path); err != nil {
+	if err := operations.rename(temporaryPath, s.path); err != nil {
 		cleanup()
 		return fmt.Errorf("atomically replace provisioning journal: %w", err)
 	}
 
-	parent, err := os.Open(directory)
+	parent, err := operations.openDirectory(directory)
 	if err != nil {
 		return fmt.Errorf("open provisioning journal directory for sync: %w", err)
 	}

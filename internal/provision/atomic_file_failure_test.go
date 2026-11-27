@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 type failingProvisionAtomicFile struct {
@@ -172,6 +173,102 @@ func TestWriteOwnedAtomicFileFailureBoundaries(t *testing.T) {
 			}
 			if len(entries) != 0 {
 				t.Fatalf("temporary file was not cleaned after failure: %v", entries)
+			}
+		})
+	}
+}
+
+
+func TestProvisionJournalSaveFailureBoundaries(t *testing.T) {
+	failureStages := []string{
+		"create",
+		"chmod",
+		"chown",
+		"write",
+		"short_write",
+		"file_sync",
+		"file_close",
+		"rename",
+		"open_directory",
+		"directory_sync",
+	}
+
+	for _, failureStage := range failureStages {
+		t.Run(failureStage, func(t *testing.T) {
+			parent := t.TempDir()
+			journalPath := filepath.Join(parent, "provisioning-journal.json")
+			store, original, err := newProvisionJournalForOperation(journalPath, "restore_agent")
+			if err != nil {
+				t.Fatalf("create initial journal: %v", err)
+			}
+
+			updated := original
+			updated.Phase = "rollback_required"
+			updated.UpdatedAt = time.Now().UTC()
+			operations := defaultProvisionAtomicFileOperations()
+
+			operations.createTemp = func(directory string, pattern string) (provisionAtomicFile, error) {
+				if failureStage == "create" {
+					return nil, errors.New("injected temporary-file creation failure")
+				}
+
+				file, err := os.CreateTemp(directory, pattern)
+				if err != nil {
+					return nil, err
+				}
+
+				return &failingProvisionAtomicFile{
+					File:    file,
+					failure: failureStage,
+				}, nil
+			}
+			operations.rename = func(oldPath string, newPath string) error {
+				if failureStage == "rename" {
+					return errors.New("injected rename failure")
+				}
+
+				return os.Rename(oldPath, newPath)
+			}
+			operations.openDirectory = func(path string) (provisionAtomicDirectory, error) {
+				if failureStage == "open_directory" {
+					return nil, errors.New("injected directory open failure")
+				}
+
+				directory, err := os.Open(path)
+				if err != nil {
+					return nil, err
+				}
+
+				return &failingProvisionAtomicDirectory{
+					File:    directory,
+					failure: failureStage,
+				}, nil
+			}
+
+			if err := store.saveWithOperations(updated, operations); err == nil {
+				t.Fatal("injected journal filesystem failure must be returned")
+			}
+
+			persisted, err := store.Load()
+			if err != nil {
+				t.Fatalf("load journal after injected failure: %v", err)
+			}
+
+			postRenameFailure := failureStage == "open_directory" || failureStage == "directory_sync"
+			if postRenameFailure {
+				if persisted.Phase != "rollback_required" {
+					t.Fatalf("journal must contain the renamed update after post-rename failure, got %q", persisted.Phase)
+				}
+			} else if persisted.Phase != "in_progress" {
+				t.Fatalf("previous journal must remain intact before rename, got %q", persisted.Phase)
+			}
+
+			entries, err := os.ReadDir(parent)
+			if err != nil {
+				t.Fatalf("read journal directory: %v", err)
+			}
+			if len(entries) != 1 || entries[0].Name() != filepath.Base(journalPath) {
+				t.Fatalf("temporary journal file was not cleaned: %v", entries)
 			}
 		})
 	}
