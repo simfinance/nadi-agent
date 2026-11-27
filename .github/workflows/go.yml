@@ -105,19 +105,19 @@ jobs:
 
                   for architecture in amd64 arm64; do
                       binary_path="$temporary_directory/nadi-agent-$architecture"
-                      package_path="$temporary_directory/nadi-provision-helper_0.7.5_$architecture.deb"
+                      package_path="$temporary_directory/nadi-provision-helper_0.7.5-dev_$architecture.deb"
 
                       GOOS=linux GOARCH="$architecture" CGO_ENABLED=0 go build -o "$binary_path" ./cmd/nadi-agent
                       digest="$(sha256sum "$binary_path" | awk '{print $1}')"
 
                       scripts/build-helper-deb.sh \
                           "$binary_path" \
-                          "0.7.5" \
+                          "0.7.5-dev" \
                           "$architecture" \
                           "$digest" \
                           "$package_path"
 
-                      scripts/test-helper-deb.sh "$package_path" "0.7.5" "$architecture"
+                      scripts/test-helper-deb.sh "$package_path" "0.7.5-dev" "$architecture"
 
                       openssl pkeyutl \
                           -sign \
@@ -132,7 +132,7 @@ jobs:
                           "$package_path.sig"
                   done
 
-                  sudo dpkg -i "$temporary_directory/nadi-provision-helper_0.7.5_amd64.deb"
+                  sudo dpkg -i "$temporary_directory/nadi-provision-helper_0.7.5-dev_amd64.deb"
 
                   installed_metadata="$(stat -c '%u:%g:%a' /usr/libexec/nadi/nadi-provision)"
                   if [ "$installed_metadata" != "0:0:755" ]; then
