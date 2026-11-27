@@ -15,6 +15,17 @@ const CurrentSchemaVersion = 1
 
 var ErrNotFound = errors.New("agent state not found")
 
+type ReceivedCommand struct {
+	CommandID     string          `json:"command_id"`
+	ApplicationID string          `json:"application_id"`
+	CommandType   string          `json:"command_type"`
+	Payload       json.RawMessage `json:"payload"`
+	IssuedAt      time.Time       `json:"issued_at"`
+	ExpiresAt     *time.Time      `json:"expires_at,omitempty"`
+	ReceivedAt    time.Time       `json:"received_at"`
+	Acknowledged  bool            `json:"acknowledged"`
+}
+
 type PendingEnrollment struct {
 	RequestID string `json:"request_id"`
 	Body      string `json:"body"`
@@ -81,6 +92,7 @@ type State struct {
 	Applications              []EnrolledApplication    `json:"applications,omitempty"`
 	ActivationGrants          []StoredActivationGrant  `json:"activation_grants,omitempty"`
 	PendingAcknowledgements   []PendingAcknowledgement `json:"pending_acknowledgements,omitempty"`
+	ReceivedCommands           []ReceivedCommand        `json:"received_commands,omitempty"`
 	PendingEnrollment         *PendingEnrollment       `json:"pending_enrollment,omitempty"`
 	EnrollmentStatus          string                   `json:"enrollment_status"`
 	CreatedAt                 time.Time                `json:"created_at"`

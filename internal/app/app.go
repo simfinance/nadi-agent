@@ -159,6 +159,12 @@ func (a *App) runControlPoll(ctx context.Context, store *state.Store, agentState
 			backoff = time.Second
 		}
 
+		if loadErr == nil && len(currentState.ReceivedCommands) > 0 {
+			if err := a.flushPendingCommandReceipts(ctx, store, &currentState); err != nil {
+				a.logger.Warn("Pending command receipt acknowledgement retry failed", "error", err)
+			}
+		}
+
 		if loadErr == nil && len(currentState.PendingAcknowledgements) > 0 {
 			if err := a.flushPendingAcknowledgements(ctx, store, &currentState); err != nil {
 				a.logger.Warn("Pending Activation Grant acknowledgement retry failed", "error", err)
@@ -235,10 +241,9 @@ func (a *App) runControlPoll(ctx context.Context, store *state.Store, agentState
 		}
 
 		if len(pollData.Commands) > 0 {
-			a.logger.Warn(
-				"Central delivered commands; command execution is disabled in this Agent milestone",
-				"commands_received", len(pollData.Commands),
-			)
+			if err := a.acceptCommands(ctx, store, pollData.Commands); err != nil {
+				a.logger.Error("Central commands could not be durably accepted or acknowledged", "error", err)
+			}
 		}
 
 		if !wait(ctx, a.config.PollInterval) {
