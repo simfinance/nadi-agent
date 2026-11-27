@@ -152,12 +152,35 @@ jobs:
                       if scripts/sign-helper-package.sh \
                           "$temporary_directory/test-signing-private.pem" \
                           "$package_path" \
+                          "$temporary_directory/invalid-manifest.json" \
+                          "$temporary_directory/invalid-manifest.sig" \
+                          "$binary_path" \
+                          "$architecture" \
                           "$package_path.production-test.sig" 2>"$temporary_directory/sign-error.txt"; then
                           printf 'Signer accepted a private key outside the pinned NADI trust anchor.\n' >&2
                           exit 1
                       fi
                       grep -F 'Release private key does not match the pinned NADI trust anchor' "$temporary_directory/sign-error.txt"
                   done
+
+                  printf '%s\n' '{"schema_version":1,"product":"nadi-agent","key_id":"nadi-agent-release-2026-01","version":"0.0.0","protocol_version":1,"released_at":"2026-11-27T00:00:00Z","artifacts":[]}' > "$temporary_directory/invalid-manifest.json"
+                  openssl pkeyutl \
+                      -sign \
+                      -rawin \
+                      -inkey "$temporary_directory/test-signing-private.pem" \
+                      -in "$temporary_directory/invalid-manifest.json" \
+                      -out "$temporary_directory/invalid-manifest.sig"
+                  base64 -w0 "$temporary_directory/invalid-manifest.sig" > "$temporary_directory/invalid-manifest.sig.b64"
+
+                  if go run ./scripts/verify-release-artifact.go \
+                      "$temporary_directory/invalid-manifest.json" \
+                      "$temporary_directory/invalid-manifest.sig.b64" \
+                      "$temporary_directory/nadi-agent-amd64" \
+                      amd64 2>"$temporary_directory/manifest-error.txt"; then
+                      printf 'Release verifier accepted a manifest signed by an untrusted key.\n' >&2
+                      exit 1
+                  fi
+                  grep -F 'release manifest signature verification failed' "$temporary_directory/manifest-error.txt"
 
                   sudo dpkg -i "$temporary_directory/nadi-provision-helper_${agent_version}_amd64.deb"
 

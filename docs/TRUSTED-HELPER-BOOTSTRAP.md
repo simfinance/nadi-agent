@@ -28,7 +28,20 @@ The bootstrap package is named `nadi-provision-helper`. It is an architecture-sp
 
 The package contains no maintainer scripts, service units, configuration files, credentials, or additional executables. Its helper file is root:root mode 0755. Package construction uses `dpkg-deb --root-owner-group` and validates the source Agent binary against the SHA-256 digest supplied by the signed release manifest.
 
-The release process must produce a detached Ed25519 signature over the complete `.deb` package using the existing NADI Agent release signing key. The release signer performs this operation in its protected signing environment; the private key is never placed in the repository, CI logs, or the customer server:
+The release process must bind the package to the exact binary in the signed Agent release manifest before producing a detached Ed25519 signature over the complete `.deb` package. The release signer verifies the manifest signature, selects the exact Linux architecture entry, verifies the artifact SHA-256, checks the package version/architecture, and compares the packaged helper bytes with that artifact. The private key is used only in the protected signing environment and is never placed in the repository, CI logs, or the customer server:
+
+```bash
+scripts/sign-helper-package.sh \
+    "$NADI_RELEASE_SIGNING_PRIVATE_KEY" \
+    nadi-provision-helper_VERSION_ARCH.deb \
+    release-manifest.json \
+    release-manifest.sig.base64 \
+    nadi-agent-linux-ARCH \
+    ARCH \
+    nadi-provision-helper_VERSION_ARCH.deb.sig
+``
+
+The signer uses `scripts/verify-release-artifact.go` and the embedded NADI release trust anchor. A checksum supplied independently by a caller is not sufficient authorization to sign a bootstrap package.
 
 ```bash
 scripts/sign-helper-package.sh \\
